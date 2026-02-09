@@ -12,10 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5ae67506fc8b34252bdd003a2f626a2f, type: 3}
   m_Name: MorphClip_001
   m_EditorClassIdentifier: 
-  sourceShape: {fileID: 0}
-  targetShape: {fileID: 0}
+  sourceShape: {fileID: 11400000, guid: 55da389a892a94e3caef0fa560e15e1d, type: 2}
+  targetShape: {fileID: 11400000, guid: 4046c0e45ed1545a8a917f77682027ff, type: 2}
   alignOffset: 0
-  duration: 1
+  duration: 2
   curve:
     serializedVersion: 2
     m_Curve:
