@@ -499,11 +499,25 @@ public class VectorTimelineEditorWindow : EditorWindow
 
     void UpdateScenePreview()
     {
-        if (previewPlayer == null) previewPlayer = FindFirstObjectByType<VectorTimelinePlayer>();
+        // 1. 自动寻找 Player (如果丢失)
+        if (previewPlayer == null)
+            previewPlayer = FindFirstObjectByType<VectorTimelinePlayer>();
+
         if (previewPlayer != null && currentAsset != null)
         {
-            if (previewPlayer.timelineData != currentAsset) previewPlayer.timelineData = currentAsset;
+            // 2. 同步数据引用
+            if (previewPlayer.timelineData != currentAsset)
+                previewPlayer.timelineData = currentAsset;
+
+            // ✨✨ 核心修复：双向同步 ✨✨
+            // 将编辑器的时间，强制写入 Player 的 Inspector 变量
+            // 这样 Player 自身的 Update() 也会使用这个时间，避免逻辑冲突
+            previewPlayer.debugTime = currentTime;
+
+            // 3. 强制驱动渲染
             previewPlayer.Evaluate(currentTime);
+
+            // 4. 强制刷新 Scene 视图 (否则网格更新了但画面不动)
             SceneView.RepaintAll();
         }
     }
