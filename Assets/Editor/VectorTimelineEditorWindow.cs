@@ -56,6 +56,21 @@ public class VectorTimelineEditorWindow : EditorWindow
 
     private void OnEditorUpdate()
     {
+        // ✨ 新增：运行时逻辑
+        if (Application.isPlaying)
+        {
+            if (previewPlayer != null)
+            {
+                // 运行时被动同步：编辑器红线跟随游戏时间
+                currentTime = previewPlayer.CurrentTime;
+                Repaint(); // 强制重绘编辑器界面以显示红线移动
+            }
+            // 运行时不执行编辑器的 UpdateScenePreview 或内部计时逻辑
+            return;
+        }
+
+        // --- 以下是编辑器模式逻辑 ---
+
         if (isScrubbing || isDraggingKey || isDraggingDuration) UpdateScenePreview();
 
         if (isPlaying && currentAsset != null)
@@ -83,6 +98,8 @@ public class VectorTimelineEditorWindow : EditorWindow
     private void OnGUI()
     {
         InitStyles();
+
+        // 1. 工具栏
         DrawToolbar();
 
         if (currentAsset == null)
@@ -106,6 +123,7 @@ public class VectorTimelineEditorWindow : EditorWindow
 
         GUILayout.EndScrollView();
 
+        // 4. 属性面板
         DrawInspectorArea();
     }
 
@@ -202,6 +220,12 @@ public class VectorTimelineEditorWindow : EditorWindow
             new Vector3(playheadX, rect.y + 12)
         };
         Handles.DrawAAConvexPolygon(headHandle);
+
+        // ✨ 新增：运行时显示 "PLAYING" 提示
+        if (Application.isPlaying)
+        {
+            GUI.Label(new Rect(rect.x + 10, rect.y + headerHeight + 5, 200, 20), "▶ RUNTIME MODE (READ ONLY)", EditorStyles.boldLabel);
+        }
     }
 
     void DrawDiamond(Rect rect, Color color)
@@ -218,11 +242,13 @@ public class VectorTimelineEditorWindow : EditorWindow
 
     void HandleInput(Rect rect)
     {
+        // ✨ 新增：运行时禁止所有交互
+        if (Application.isPlaying) return;
+
         Event e = Event.current;
 
         if (rect.Contains(e.mousePosition) || isDraggingKey || isScrubbing || isDraggingDuration)
         {
-            // 修复点：localX 和 mouseTime 提到最外层计算
             float localX = e.mousePosition.x - rect.x;
             float mouseTime = Mathf.Max(0, PixelToTime(localX));
 
@@ -340,6 +366,10 @@ public class VectorTimelineEditorWindow : EditorWindow
     {
         GUILayout.Space(10);
         GUILayout.Label("Inspector", EditorStyles.boldLabel);
+
+        // ✨ 新增：运行时禁用 Inspector UI
+        GUI.enabled = !Application.isPlaying;
+
         GUILayout.BeginVertical(EditorStyles.helpBox);
 
         if (selectedKeyIndex != -1 && selectedKeyIndex < currentAsset.keyframes.Count)
@@ -393,12 +423,14 @@ public class VectorTimelineEditorWindow : EditorWindow
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("+ Add Keyframe", GUILayout.Height(24))) AddKeyframe();
 
-        GUI.enabled = selectedKeyIndex != -1;
+        GUI.enabled = !Application.isPlaying && selectedKeyIndex != -1; // 保持原本逻辑叠加
         if (GUILayout.Button("- Remove Selected", GUILayout.Height(24))) RemoveKeyframe();
-        GUI.enabled = true;
+        GUI.enabled = !Application.isPlaying; // 恢复为 !isPlaying
         GUILayout.EndHorizontal();
 
         GUILayout.EndVertical();
+
+        GUI.enabled = true; // 恢复 GUI 状态
     }
 
     // =========================================================
@@ -408,6 +440,9 @@ public class VectorTimelineEditorWindow : EditorWindow
     void DrawToolbar()
     {
         GUILayout.BeginHorizontal(EditorStyles.toolbar);
+
+        // ✨ 新增：运行时禁用 Toolbar 部分功能
+        GUI.enabled = !Application.isPlaying;
 
         GUILayout.Label("Asset:", GUILayout.Width(40));
         EditorGUI.BeginChangeCheck();
@@ -420,16 +455,24 @@ public class VectorTimelineEditorWindow : EditorWindow
             isPlaying = false;
         }
 
+        GUI.enabled = true; // Player 选择器在运行时可以看，但最好也禁用拖拽，这里保持开启以便观察
+
         GUILayout.Space(10);
         GUILayout.Label("Player:", GUILayout.Width(45));
         var newPlayer = (VectorTimelinePlayer)EditorGUILayout.ObjectField(previewPlayer, typeof(VectorTimelinePlayer), true, GUILayout.Width(120));
         if (newPlayer != previewPlayer) previewPlayer = newPlayer;
 
         GUILayout.Space(10);
+
+        // ✨ 新增：运行时禁用编辑器自带的播放按钮
+        GUI.enabled = !Application.isPlaying;
+
         if (GUILayout.Button("⏮", EditorStyles.toolbarButton, GUILayout.Width(25))) { currentTime = 0; UpdateScenePreview(); }
         bool newPlaying = GUILayout.Toggle(isPlaying, isPlaying ? "⏸" : "▶", EditorStyles.toolbarButton, GUILayout.Width(35));
         if (newPlaying != isPlaying) { isPlaying = newPlaying; lastEditorTime = EditorApplication.timeSinceStartup; }
         if (GUILayout.Button("⏹", EditorStyles.toolbarButton, GUILayout.Width(25))) { isPlaying = false; currentTime = 0; UpdateScenePreview(); }
+
+        GUI.enabled = true;
 
         GUILayout.FlexibleSpace();
         GUILayout.Label("Zoom:", GUILayout.Width(40));
@@ -509,15 +552,13 @@ public class VectorTimelineEditorWindow : EditorWindow
             if (previewPlayer.timelineData != currentAsset)
                 previewPlayer.timelineData = currentAsset;
 
-            // ✨✨ 核心修复：双向同步 ✨✨
-            // 将编辑器的时间，强制写入 Player 的 Inspector 变量
-            // 这样 Player 自身的 Update() 也会使用这个时间，避免逻辑冲突
+            // 3. 将编辑器的时间，强制写入 Player 的 Inspector 变量
             previewPlayer.debugTime = currentTime;
 
-            // 3. 强制驱动渲染
+            // 4. 强制驱动渲染
             previewPlayer.Evaluate(currentTime);
 
-            // 4. 强制刷新 Scene 视图 (否则网格更新了但画面不动)
+            // 5. 强制刷新 Scene 视图
             SceneView.RepaintAll();
         }
     }
