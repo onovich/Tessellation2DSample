@@ -10,7 +10,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 2ce99d5bb386b4136b8f263382e14cb1, type: 3}
-  m_Name: VectorShape_002
+  m_Name: VectorShape_Polygon
   m_EditorClassIdentifier: 
   vertices:
   - {x: -0.00000004371139, y: 1}

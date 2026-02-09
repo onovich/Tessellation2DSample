@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   sourceShape: {fileID: 11400000, guid: 55da389a892a94e3caef0fa560e15e1d, type: 2}
   targetShape: {fileID: 11400000, guid: 4046c0e45ed1545a8a917f77682027ff, type: 2}
-  alignOffset: 0
+  alignOffset: 20
   duration: 2
   curve:
     serializedVersion: 2
