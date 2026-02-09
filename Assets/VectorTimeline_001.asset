@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: VectorTimeline_001
   m_EditorClassIdentifier: 
   loopMode: 0
-  duration: 5
+  duration: 2.4
   keyframes:
   - time: 0
     shapeAsset: {fileID: 11400000, guid: 55da389a892a94e3caef0fa560e15e1d, type: 2}
