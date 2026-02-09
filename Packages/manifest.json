@@ -1,5 +1,7 @@
 {
   "dependencies": {
+    "com.unity.localization": "1.4.5",
+    "com.codewriter.triinspector": "ssh://git@github.com/codewriter-packages/Tri-Inspector.git",
     "com.unity.collab-proxy": "2.11.3",
     "com.unity.feature.2d": "2.0.0",
     "com.unity.ide.rider": "3.0.28",
