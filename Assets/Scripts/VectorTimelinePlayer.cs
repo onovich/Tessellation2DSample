@@ -11,7 +11,7 @@ public class VectorTimelinePlayer : MonoBehaviour {
     public float playbackSpeed = 1.0f;
 
     [Header("Debug")]
-    [Range(0, 10)] // 仅用于手动拖动预览
+    [Range(0, 10)]
     public float debugTime = 0f;
 
     // --- 内部状态 ---
@@ -22,7 +22,6 @@ public class VectorTimelinePlayer : MonoBehaviour {
     private MeshFilter _mf;
     private MeshRenderer _mr;
 
-    // 缓存数据以避免 GC
     private Vector3[] _vertices;
     private Color[] _colors;
     private int[] _triangles;
@@ -31,14 +30,8 @@ public class VectorTimelinePlayer : MonoBehaviour {
         _mf = GetComponent<MeshFilter>();
         _mr = GetComponent<MeshRenderer>();
 
-        if (_mesh == null) {
-            _mesh = new Mesh();
-            _mesh.name = "TimelineMesh";
-            _mf.mesh = _mesh;
-        }
-
-        if (_mr.sharedMaterial == null)
-            _mr.sharedMaterial = new Material(Shader.Find("Sprites/Default"));
+        if (_mesh == null) { _mesh = new Mesh(); _mesh.name = "TimelineMesh"; _mf.mesh = _mesh; }
+        if (_mr.sharedMaterial == null) _mr.sharedMaterial = new Material(Shader.Find("Sprites/Default"));
 
         if (timelineData != null) Evaluate(0);
     }
@@ -57,30 +50,30 @@ public class VectorTimelinePlayer : MonoBehaviour {
             if (_isPlaying && timelineData != null) {
                 _currentTime += Time.deltaTime * playbackSpeed;
                 Evaluate(_currentTime);
-                debugTime = _currentTime; // 同步给 Inspector 看
+                debugTime = _currentTime;
             }
         } else {
-            // 编辑器模式：允许拖动 debugTime 预览
             Evaluate(debugTime);
         }
     }
 
     // =========================================================
-    // ✨ 核心逻辑：根据时间计算形状
+    // ✨ 核心逻辑：根据时间计算形状 (包含 Loop 修复)
     // =========================================================
     public void Evaluate(float rawTime) {
         if (timelineData == null || timelineData.keyframes.Count == 0) return;
 
-        // 1. 处理循环模式，获取 Time In Loop
         float duration = timelineData.GetDuration();
         float tLoop = 0f;
 
+        // 1. 计算循环时间
         switch (timelineData.loopMode) {
             case VectorLoopMode.Once:
                 tLoop = Mathf.Clamp(rawTime, 0, duration);
                 if (rawTime > duration) _isPlaying = false;
                 break;
             case VectorLoopMode.Loop:
+                // 使用 Repeat 实现循环
                 tLoop = Mathf.Repeat(rawTime, duration);
                 break;
             case VectorLoopMode.PingPong:
@@ -88,83 +81,113 @@ public class VectorTimelinePlayer : MonoBehaviour {
                 break;
         }
 
-        // 2. 查找关键帧 (Timeline Logic)
-        // 我们需要找到 index，使得 keyframes[i].time <= tLoop < keyframes[i+1].time
         var keys = timelineData.keyframes;
         int prevIndex = -1;
 
-        // 简单的线性搜索 (关键帧少时够快，如果成千上万帧建议用二分查找)
+        // 2. 查找当前时间落在哪个区间
         for (int i = 0; i < keys.Count; i++) {
             if (keys[i].time <= tLoop) prevIndex = i;
-            else break; // 找到了，当前时间已经在 keys[i] 后面了
+            else break;
         }
 
-        // 3. 处理边界情况
-        if (prevIndex == -1) // 时间在第一个关键帧之前
-        {
-            // 显示第一帧
-            RenderShape(keys[0].shapeAsset, keys[0].shapeAsset, 0, keys[0].scale, keys[0].scale, 0);
+        // -------------------------------------------------------------
+        // ✨ 情况 A: 时间在第一帧之前 (且不是 Loop 模式的回环阶段)
+        // -------------------------------------------------------------
+        if (prevIndex == -1) {
+            var first = keys[0];
+            RenderShape(first.shapeAsset, first.shapeAsset, 0, first.scale, first.scale, 0);
             return;
         }
 
-        if (prevIndex >= keys.Count - 1) // 时间在最后一个关键帧之后
-        {
-            // 显示最后一帧
-            var last = keys[keys.Count - 1];
-            RenderShape(last.shapeAsset, last.shapeAsset, 0, last.scale, last.scale, 0);
-            return;
+        // -------------------------------------------------------------
+        // ✨ 情况 B: 时间超过了最后一帧
+        //    这是处理 Loop 回环的关键点！
+        // -------------------------------------------------------------
+        if (prevIndex >= keys.Count - 1) {
+            // 如果是 Loop 模式，且 Duration 比最后一帧时间长
+            // 我们需要补间：LastFrame -> FirstFrame
+            if (timelineData.loopMode == VectorLoopMode.Loop && duration > keys[prevIndex].time) {
+                TimelineKeyframe lastKey = keys[keys.Count - 1]; // 源：最后一帧
+                TimelineKeyframe firstKey = keys[0];             // 目标：第一帧
+
+                // 计算回环段的总时长： (总时长 - 最后一帧时间) + (第一帧时间)
+                // 想象时间轴是圆的，这是两点间的弧长
+                float loopSegmentDuration = (duration - lastKey.time) + firstKey.time;
+
+                // 如果时长太短，视为骤变
+                if (loopSegmentDuration < 0.0001f || firstKey.isInstant) {
+                    RenderShape(firstKey.shapeAsset, firstKey.shapeAsset, 0, firstKey.scale, firstKey.scale, 0);
+                } else {
+                    // 计算当前在这个回环段的进度
+                    // 当前时间 tLoop 肯定大于 lastKey.time
+                    float currentSegmentTime = tLoop - lastKey.time;
+                    float tLinear = currentSegmentTime / loopSegmentDuration;
+
+                    // 使用第一帧定义的曲线（进入第一帧的曲线）
+                    float tCurved = firstKey.curve.Evaluate(tLinear);
+
+                    RenderShape(
+                        lastKey.shapeAsset,
+                        firstKey.shapeAsset,
+                        tCurved,
+                        lastKey.scale,
+                        firstKey.scale,
+                        firstKey.alignOffset // 使用第一帧的对齐设置
+                    );
+                }
+                return;
+            } else {
+                // 非 Loop 模式，或者 PingPong 模式，或者时间还没到 Duration
+                // 保持最后一帧的状态
+                var last = keys[keys.Count - 1];
+                RenderShape(last.shapeAsset, last.shapeAsset, 0, last.scale, last.scale, 0);
+                return;
+            }
         }
 
-        // 4. 计算补间 (Tween Logic)
+        // -------------------------------------------------------------
+        // ✨ 情况 C: 正常的中间帧补间 (Prev -> Next)
+        // -------------------------------------------------------------
         TimelineKeyframe prevKey = keys[prevIndex];
         TimelineKeyframe nextKey = keys[prevIndex + 1];
 
-        // 4.1 骤变 (Instant) 检测
-        // 规则：如果 NEXT 帧被标记为 Instant，或者两者时间极其接近
+        // 骤变检测
         if (nextKey.isInstant || (nextKey.time - prevKey.time) < 0.0001f) {
-            // 直接跳到下一帧（或者保持上一帧，看具体需求，通常是跳变）
             RenderShape(nextKey.shapeAsset, nextKey.shapeAsset, 0, nextKey.scale, nextKey.scale, 0);
             return;
         }
 
-        // 4.2 计算进度 t (0~1)
+        // 进度计算
         float segmentDuration = nextKey.time - prevKey.time;
         float segmentLocalTime = tLoop - prevKey.time;
-        float tLinear = segmentLocalTime / segmentDuration;
+        float t = segmentLocalTime / segmentDuration;
 
-        // 应用曲线 (使用 Next Key 定义的曲线来进入它)
-        float tCurved = nextKey.curve.Evaluate(tLinear);
+        // 应用曲线
+        float tFinal = nextKey.curve.Evaluate(t);
 
-        // 5. 执行渲染
+        // 渲染
         RenderShape(
             prevKey.shapeAsset,
             nextKey.shapeAsset,
-            tCurved,
+            tFinal,
             prevKey.scale,
             nextKey.scale,
-            nextKey.alignOffset // 使用 Target 的 Offset
+            nextKey.alignOffset
         );
     }
 
-    // =========================================================
-    // 底层渲染 (Mesh Generation)
-    // =========================================================
+    // --- 底层 RenderShape 方法保持不变 ---
     void RenderShape(VectorShapeAsset shapeA, VectorShapeAsset shapeB, float t, float scaleA, float scaleB, int offset) {
-        // 容错：如果 Asset 为空（可能是隐藏帧），我们需要一个 fallback
-        // 这里的逻辑是：如果 shapeAsset 为 null，我们假设它是一个缩放为0的点
         if (shapeA == null && shapeB == null) { _mesh.Clear(); return; }
 
-        // 获取顶点数据，如果为空则找另一个借用一下分辨率（反正缩放可能是0）
         Vector2[] vertsA = shapeA != null ? shapeA.vertices : shapeB?.vertices;
         Vector2[] vertsB = shapeB != null ? shapeB.vertices : shapeA?.vertices;
 
         if (vertsA == null || vertsB == null) return;
 
         int res = vertsA.Length;
-        // 确保 vertsB 也是 res 长度 (在 Bake 时应该保证了一致性，这里做个安全截断/循环)
-
-        // 内存分配
         int totalVerts = res + 1;
+
         if (_vertices == null || _vertices.Length != totalVerts) {
             _vertices = new Vector3[totalVerts];
             _colors = new Color[totalVerts];
@@ -176,27 +199,21 @@ public class VectorTimelinePlayer : MonoBehaviour {
             _mesh.Clear();
         }
 
-        // 插值 Scale
         float currentScale = Mathf.Lerp(scaleA, scaleB, t);
 
-        // 如果 Scale 极小，直接不渲染以节省性能（或者隐藏）
         if (currentScale < 0.001f) {
-            // 把所有点折叠到 0
             for (int i = 0; i < totalVerts; i++) _vertices[i] = Vector3.zero;
         } else {
             _vertices[0] = Vector3.zero;
             _colors[0] = Color.white;
 
             for (int i = 0; i < res; i++) {
-                // 获取 A 的点
-                Vector2 pA = (shapeA != null) ? vertsA[i] : vertsB[i]; // 如果A是空，就从B开始变
+                Vector2 pA = (shapeA != null) ? vertsA[i] : vertsB[i];
 
-                // 获取 B 的点 (应用 Offset)
                 int idxB = (i + offset) % res;
                 if (idxB < 0) idxB += res;
-                Vector2 pB = (shapeB != null) ? vertsB[idxB] : vertsA[idxB]; // 如果B是空，就变回A
+                Vector2 pB = (shapeB != null) ? vertsB[idxB] : vertsA[idxB];
 
-                // 核心插值
                 Vector2 finalPos = Vector2.Lerp(pA, pB, t) * currentScale;
                 _vertices[i + 1] = new Vector3(finalPos.x, finalPos.y, 0);
                 _colors[i + 1] = Color.white;

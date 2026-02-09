@@ -12,8 +12,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bd9c0d41e320c4afdbdb75acca06621f, type: 3}
   m_Name: VectorTimeline_001
   m_EditorClassIdentifier: 
-  loopMode: 2
-  duration: 0
+  loopMode: 1
+  duration: 4
   keyframes:
   - time: 0
     shapeAsset: {fileID: 11400000, guid: 55da389a892a94e3caef0fa560e15e1d, type: 2}

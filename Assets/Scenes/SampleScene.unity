@@ -342,7 +342,7 @@ MeshFilter:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 593298453}
-  m_Mesh: {fileID: 1581336848}
+  m_Mesh: {fileID: 1632672215}
 --- !u!4 &593298457
 Transform:
   m_ObjectHideFlags: 0
@@ -796,7 +796,7 @@ Material:
     - _RendererColor: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1
---- !u!43 &1581336848
+--- !u!43 &1632672215
 Mesh:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -1079,7 +1079,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1738687021
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1093,8 +1093,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   targetAsset: {fileID: 11400000, guid: e6ad59ac63d1c42b2bf9b03537e67741, type: 2}
-  loopMode: 2
-  customDuration: 0
+  loopMode: 1
+  customDuration: 4
   keyframes:
   - time: 0
     shapeAsset: {fileID: 11400000, guid: 55da389a892a94e3caef0fa560e15e1d, type: 2}
