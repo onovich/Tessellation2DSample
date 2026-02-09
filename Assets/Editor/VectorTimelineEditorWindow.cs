@@ -12,8 +12,8 @@ public class VectorTimelineEditorWindow : EditorWindow
     // --- 视图配置 ---
     private float zoom = 100f; // 1秒 = 100像素
     private float headerHeight = 30f;
-    private float trackHeight = 80f;
-    private Vector2 scrollPos = Vector2.zero; // 滚动条位置
+    private float trackHeight = 100f; // 轨道高度
+    private Vector2 scrollPos = Vector2.zero;
 
     // --- 播放状态 ---
     private float currentTime = 0f;
@@ -28,6 +28,7 @@ public class VectorTimelineEditorWindow : EditorWindow
     // --- 样式缓存 ---
     private GUIStyle keyframeStyle;
     private Texture2D whiteTexture;
+    private Texture2D keyframeIcon;
 
     [MenuItem("Window/Vector Morph/Timeline Editor")]
     public static void ShowWindow()
@@ -42,6 +43,7 @@ public class VectorTimelineEditorWindow : EditorWindow
 
         EditorApplication.update += OnEditorUpdate;
 
+        // 初始化纹理
         whiteTexture = new Texture2D(1, 1);
         whiteTexture.SetPixel(0, 0, Color.white);
         whiteTexture.Apply();
@@ -51,11 +53,12 @@ public class VectorTimelineEditorWindow : EditorWindow
     {
         EditorApplication.update -= OnEditorUpdate;
         if (whiteTexture != null) DestroyImmediate(whiteTexture);
+        if (keyframeIcon != null) DestroyImmediate(keyframeIcon);
     }
 
     private void OnEditorUpdate()
     {
-        // 拖拽时强制刷新预览
+        // 拖拽时强制刷新
         if (isScrubbing || isDraggingKey) UpdateScenePreview();
 
         if (isPlaying && currentAsset != null)
@@ -84,7 +87,7 @@ public class VectorTimelineEditorWindow : EditorWindow
     {
         InitStyles();
 
-        // 1. 工具栏 (包含 Zoom 滑块)
+        // 1. 顶部工具栏
         DrawToolbar();
 
         if (currentAsset == null)
@@ -95,221 +98,140 @@ public class VectorTimelineEditorWindow : EditorWindow
             return;
         }
 
-        // 2. 计算内容总宽度
-        // 规则：取 (Duration) 和 (最后一个关键帧 + 1秒) 的最大值，保证能显示完
+        // 2. 计算内容区域
         float maxTime = GetMaxVisibleTime();
-        float contentWidth = maxTime * zoom + 50f; // +50f 留一点余量
+        float contentWidth = maxTime * zoom + 100f;
 
-        // 3. 滚动视图区域
-        // 使用 GUILayout.BeginScrollView 自动处理滚动条
-        scrollPos = GUILayout.BeginScrollView(scrollPos, false, true,
-            GUILayout.Height(headerHeight + trackHeight + 20)); // +20 是滚动条的高度
+        // 3. 开始滚动视图
+        scrollPos = GUILayout.BeginScrollView(scrollPos, false, true, GUILayout.Height(headerHeight + trackHeight + 20));
 
-        // 在 ScrollView 内部，我们需要保留一个足够大的空间
-        // 使用 GUILayoutUtility.GetRect 占位，或者直接绘制
+        // 在滚动视图内部申请一块绘制区域
         Rect contentRect = GUILayoutUtility.GetRect(contentWidth, headerHeight + trackHeight);
 
-        // 绘制背景
-        GUI.BeginGroup(contentRect);
+        // --- 核心修复：绘制和交互都在这里进行 ---
         DrawTimelineContent(contentRect, maxTime);
-        GUI.EndGroup();
-
-        // 处理输入 (坐标系是相对于 contentRect 的，也就是 ScrollView 内部坐标)
         HandleInput(contentRect);
 
         GUILayout.EndScrollView();
 
-        // 4. 属性面板
+        // 4. 底部属性面板
         DrawInspectorArea();
     }
 
     // =========================================================
-    // 逻辑计算
+    // 绘图逻辑
     // =========================================================
-
-    float GetMaxVisibleTime()
-    {
-        float maxT = currentAsset.duration > 0 ? currentAsset.duration : 0f;
-        if (currentAsset.keyframes.Count > 0)
-        {
-            float lastKeyTime = currentAsset.keyframes.Max(k => k.time);
-            if (lastKeyTime > maxT) maxT = lastKeyTime;
-        }
-        // 如果都没设置，默认显示 5 秒
-        return Mathf.Max(maxT, 5.0f);
-    }
-
-    float TimeToPixel(float time) => time * zoom;
-    float PixelToTime(float pixel) => pixel / zoom;
-
-    // =========================================================
-    // 绘图
-    // =========================================================
-
-    void DrawToolbar()
-    {
-        GUILayout.BeginHorizontal(EditorStyles.toolbar);
-
-        // Asset
-        GUILayout.Label("Asset:", GUILayout.Width(40));
-        EditorGUI.BeginChangeCheck();
-        var newAsset = (VectorTimelineAsset)EditorGUILayout.ObjectField(currentAsset, typeof(VectorTimelineAsset), false, GUILayout.Width(150));
-        if (EditorGUI.EndChangeCheck())
-        {
-            currentAsset = newAsset;
-            selectedKeyIndex = -1;
-            currentTime = 0;
-            isPlaying = false;
-        }
-
-        // Player
-        GUILayout.Space(10);
-        GUILayout.Label("Player:", GUILayout.Width(45));
-        var newPlayer = (VectorTimelinePlayer)EditorGUILayout.ObjectField(previewPlayer, typeof(VectorTimelinePlayer), true, GUILayout.Width(120));
-        if (newPlayer != previewPlayer) previewPlayer = newPlayer;
-
-        GUILayout.Space(10);
-
-        // Play Controls
-        if (GUILayout.Button("⏮", EditorStyles.toolbarButton, GUILayout.Width(25))) { currentTime = 0; UpdateScenePreview(); }
-
-        bool newPlaying = GUILayout.Toggle(isPlaying, isPlaying ? "⏸" : "▶", EditorStyles.toolbarButton, GUILayout.Width(35));
-        if (newPlaying != isPlaying)
-        {
-            isPlaying = newPlaying;
-            lastEditorTime = EditorApplication.timeSinceStartup;
-        }
-
-        if (GUILayout.Button("⏹", EditorStyles.toolbarButton, GUILayout.Width(25))) { isPlaying = false; currentTime = 0; UpdateScenePreview(); }
-
-        // Time Label
-        GUILayout.Space(5);
-        GUILayout.Label($"{currentTime:F2}s", GUILayout.Width(50));
-
-        GUILayout.FlexibleSpace();
-
-        // Zoom Slider
-        GUILayout.Label("Zoom:", GUILayout.Width(40));
-        zoom = GUILayout.HorizontalSlider(zoom, 10f, 500f, GUILayout.Width(100));
-
-        GUILayout.EndHorizontal();
-    }
 
     void DrawTimelineContent(Rect rect, float maxTime)
     {
-        // 1. 背景
-        Rect bgRect = new Rect(0, 0, rect.width, rect.height);
-        EditorGUI.DrawRect(bgRect, new Color(0.18f, 0.18f, 0.18f));
+        // 背景
+        EditorGUI.DrawRect(rect, new Color(0.18f, 0.18f, 0.18f));
 
-        // 2. 标尺背景
-        Rect rulerRect = new Rect(0, 0, rect.width, headerHeight);
+        // 标尺背景
+        Rect rulerRect = new Rect(rect.x, rect.y, rect.width, headerHeight);
         EditorGUI.DrawRect(rulerRect, new Color(0.22f, 0.22f, 0.22f));
 
-        // 3. 绘制刻度
-        Handles.color = Color.gray;
-
-        // 动态刻度步长
-        float timeStep = 1.0f;
-        if (zoom > 300) timeStep = 0.1f;
-        else if (zoom > 100) timeStep = 0.5f;
-        else timeStep = 1.0f;
+        // 绘制网格和刻度
+        Handles.color = new Color(1, 1, 1, 0.2f);
+        float timeStep = GetTimeStep();
 
         for (float t = 0; t <= maxTime; t += timeStep)
         {
-            float x = TimeToPixel(t);
+            float x = rect.x + TimeToPixel(t);
             bool isMain = Mathf.Abs(t % 1.0f) < 0.001f;
             float h = isMain ? headerHeight : headerHeight * 0.5f;
 
-            Handles.color = isMain ? new Color(0.6f, 0.6f, 0.6f) : new Color(0.4f, 0.4f, 0.4f);
-            Handles.DrawLine(new Vector3(x, headerHeight - h), new Vector3(x, headerHeight));
+            // 刻度线
+            Handles.color = isMain ? Color.gray : new Color(0.4f, 0.4f, 0.4f);
+            Handles.DrawLine(new Vector3(x, rect.y + headerHeight - h), new Vector3(x, rect.y + headerHeight));
+
             // 垂直参考线
             if (isMain)
             {
                 Handles.color = new Color(1, 1, 1, 0.05f);
-                Handles.DrawLine(new Vector3(x, headerHeight), new Vector3(x, rect.height));
-                GUI.Label(new Rect(x + 2, 0, 40, 20), t.ToString("0"), EditorStyles.miniLabel);
+                Handles.DrawLine(new Vector3(x, rect.y + headerHeight), new Vector3(x, rect.y + rect.height));
+                GUI.Label(new Rect(x + 2, rect.y, 40, 20), t.ToString("0"), EditorStyles.miniLabel);
             }
         }
 
-        // 4. 绘制关键帧
-        DrawKeyframes(rect);
-
-        // 5. 绘制 Duration 线 (如果设置了)
+        // 绘制 Duration 线
         if (currentAsset.duration > 0)
         {
-            float durX = TimeToPixel(currentAsset.duration);
-            Handles.color = Color.blue;
-            Handles.DrawLine(new Vector3(durX, 0), new Vector3(durX, rect.height));
-            GUI.Label(new Rect(durX + 2, headerHeight + 5, 50, 20), "End", EditorStyles.miniLabel);
+            float durX = rect.x + TimeToPixel(currentAsset.duration);
+            Handles.color = new Color(0.2f, 0.5f, 1f, 0.8f);
+            Handles.DrawLine(new Vector3(durX, rect.y), new Vector3(durX, rect.y + rect.height));
+            GUI.Label(new Rect(durX + 5, rect.y + headerHeight + 5, 50, 20), "Loop End", EditorStyles.miniBoldLabel);
 
-            // 绘制 Duration 之后的遮罩 (表示无效区域)
-            if (rect.width > durX)
-            {
-                Rect maskRect = new Rect(durX, headerHeight, rect.width - durX, rect.height - headerHeight);
-                EditorGUI.DrawRect(maskRect, new Color(0, 0, 0, 0.3f));
-            }
+            // 遮罩
+            Rect maskRect = new Rect(durX, rect.y + headerHeight, rect.width - (durX - rect.x), rect.height - headerHeight);
+            EditorGUI.DrawRect(maskRect, new Color(0, 0, 0, 0.3f));
         }
 
-        // 6. 绘制播放头
-        // 限制播放头不超出显示范围
-        float playheadX = TimeToPixel(currentTime);
-        Handles.color = Color.red;
-        Handles.DrawLine(new Vector3(playheadX, 0), new Vector3(playheadX, rect.height));
-        Vector3[] hat = { new Vector3(playheadX - 5, 0), new Vector3(playheadX + 5, 0), new Vector3(playheadX, 10) };
-        Handles.color = Color.red;
-        Handles.DrawAAConvexPolygon(hat);
-    }
+        // 绘制关键帧连线
+        float keyY = rect.y + headerHeight + (trackHeight / 2) - 8;
+        Handles.color = Color.white;
+        for (int i = 0; i < currentAsset.keyframes.Count - 1; i++)
+        {
+            float x1 = rect.x + TimeToPixel(currentAsset.keyframes[i].time);
+            float x2 = rect.x + TimeToPixel(currentAsset.keyframes[i + 1].time);
+            Handles.DrawDottedLine(new Vector3(x1, keyY + 8), new Vector3(x2, keyY + 8), 2f);
+        }
 
-    void DrawKeyframes(Rect rect)
-    {
-        float keyY = headerHeight + (trackHeight / 2) - 6;
-
+        // 绘制关键帧节点 (菱形)
         for (int i = 0; i < currentAsset.keyframes.Count; i++)
         {
             var key = currentAsset.keyframes[i];
-            float x = TimeToPixel(key.time);
+            float x = rect.x + TimeToPixel(key.time);
+            Rect keyRect = new Rect(x - 8, keyY, 16, 16);
 
-            // 连线
-            if (i < currentAsset.keyframes.Count - 1)
-            {
-                float nextX = TimeToPixel(currentAsset.keyframes[i + 1].time);
-                Handles.color = new Color(0.5f, 0.5f, 0.5f, 0.3f);
-                Handles.DrawLine(new Vector3(x, keyY + 6), new Vector3(nextX, keyY + 6));
-            }
+            // 颜色状态
+            Color c = Color.white;
+            if (key.isInstant) c = new Color(1f, 0.5f, 0.5f); // 红色突变
+            if (i == selectedKeyIndex) c = Color.cyan;        // 选中青色
 
-            Rect keyRect = new Rect(x - 6, keyY, 12, 12);
-            Color c = (i == selectedKeyIndex) ? Color.cyan : Color.white;
-            if (key.isInstant) c = new Color(1f, 0.4f, 0.4f);
-
-            GUI.color = c;
-            GUI.Box(keyRect, GUIContent.none, keyframeStyle);
-            GUI.color = Color.white;
+            DrawDiamond(keyRect, c);
         }
+
+        // 绘制播放头
+        float playheadX = rect.x + TimeToPixel(currentTime);
+        Handles.color = Color.red;
+        Handles.DrawLine(new Vector3(playheadX, rect.y), new Vector3(playheadX, rect.y + rect.height));
+    }
+
+    // 绘制菱形图标
+    void DrawDiamond(Rect rect, Color color)
+    {
+        Color old = GUI.color;
+        GUI.color = color;
+        // 使用内置的 Button 样式绘制，旋转 45 度模拟菱形，或者直接画 Box
+        // 这里用一个简单的 Box，为了清晰可见
+        GUI.Box(rect, GUIContent.none, GUI.skin.button);
+        GUI.color = old;
     }
 
     // =========================================================
-    // 交互处理
+    // 交互逻辑 (修复版：坐标系一致)
     // =========================================================
 
     void HandleInput(Rect rect)
     {
         Event e = Event.current;
-        Vector2 mousePos = e.mousePosition; // 相对于 ScrollView 内容的坐标
 
-        if (rect.Contains(mousePos) || isDraggingKey || isScrubbing)
+        // 只有当鼠标在内容区域内，或者正在拖拽操作时才响应
+        if (rect.Contains(e.mousePosition) || isDraggingKey || isScrubbing)
         {
-            // --- 鼠标左键按下 ---
             if (e.type == EventType.MouseDown && e.button == 0)
             {
-                // 1. 检查是否点中关键帧
+                // 1. 优先检测：点击关键帧
                 bool hitKey = false;
+                float keyY = rect.y + headerHeight + (trackHeight / 2) - 8;
+
                 for (int i = 0; i < currentAsset.keyframes.Count; i++)
                 {
-                    float x = TimeToPixel(currentAsset.keyframes[i].time);
-                    float y = headerHeight + (trackHeight / 2) - 6;
-                    Rect keyRect = new Rect(x - 6, y, 12, 12);
+                    float x = rect.x + TimeToPixel(currentAsset.keyframes[i].time);
+                    Rect keyRect = new Rect(x - 8, keyY, 16, 16);
 
-                    if (keyRect.Contains(mousePos))
+                    if (keyRect.Contains(e.mousePosition))
                     {
                         selectedKeyIndex = i;
                         isDraggingKey = true;
@@ -322,28 +244,28 @@ public class VectorTimelineEditorWindow : EditorWindow
                     }
                 }
 
-                // 2. 没点中关键帧 -> 拖动播放头
+                // 2. 如果没点中，则点击空白处 -> 移动播放头
                 if (!hitKey)
                 {
                     isScrubbing = true;
-                    selectedKeyIndex = -1;
-                    float t = PixelToTime(mousePos.x);
-                    currentTime = Mathf.Max(0, t); // 限制最小为0
+                    selectedKeyIndex = -1; // 取消选中
+                    float localX = e.mousePosition.x - rect.x;
+                    currentTime = Mathf.Max(0, PixelToTime(localX));
                     Repaint();
                     UpdateScenePreview();
                     e.Use();
                 }
             }
 
-            // --- 鼠标拖拽 ---
-            if (e.type == EventType.MouseDrag && e.button == 0)
+            else if (e.type == EventType.MouseDrag && e.button == 0)
             {
-                float t = PixelToTime(mousePos.x);
-                t = Mathf.Max(0, t); // 限制不能拖到负数
+                float localX = e.mousePosition.x - rect.x;
+                float t = Mathf.Max(0, PixelToTime(localX));
 
                 if (isDraggingKey && selectedKeyIndex != -1)
                 {
-                    if (!e.shift) t = Mathf.Round(t * 10) / 10f; // 吸附
+                    // 吸附
+                    if (!e.shift) t = Mathf.Round(t * 10) / 10f;
 
                     Undo.RecordObject(currentAsset, "Move Keyframe");
                     var key = currentAsset.keyframes[selectedKeyIndex];
@@ -351,7 +273,7 @@ public class VectorTimelineEditorWindow : EditorWindow
                     currentAsset.keyframes[selectedKeyIndex] = key;
                     EditorUtility.SetDirty(currentAsset);
 
-                    currentTime = t; // 拖关键帧时，播放头跟随，方便看效果
+                    currentTime = t; // 拖动时同步预览
                     UpdateScenePreview();
                     e.Use();
                 }
@@ -364,8 +286,7 @@ public class VectorTimelineEditorWindow : EditorWindow
                 }
             }
 
-            // --- 鼠标松开 ---
-            if (e.type == EventType.MouseUp)
+            else if (e.type == EventType.MouseUp)
             {
                 if (isDraggingKey) { SortKeyframes(); isDraggingKey = false; }
                 isScrubbing = false;
@@ -374,7 +295,7 @@ public class VectorTimelineEditorWindow : EditorWindow
     }
 
     // =========================================================
-    // 属性面板
+    // 属性面板 (Inspector)
     // =========================================================
 
     void DrawInspectorArea()
@@ -383,48 +304,25 @@ public class VectorTimelineEditorWindow : EditorWindow
         GUILayout.Label("Inspector", EditorStyles.boldLabel);
         GUILayout.BeginVertical(EditorStyles.helpBox);
 
-        // Global Settings
-        EditorGUILayout.LabelField("Global Settings", EditorStyles.miniBoldLabel);
-        EditorGUI.BeginChangeCheck();
-        var loopMode = (VectorLoopMode)EditorGUILayout.EnumPopup("Loop Mode", currentAsset.loopMode);
-        float dur = EditorGUILayout.FloatField("Total Duration (0=Auto)", currentAsset.duration);
-        if (EditorGUI.EndChangeCheck())
-        {
-            Undo.RecordObject(currentAsset, "Change Settings");
-            currentAsset.loopMode = loopMode;
-            currentAsset.duration = Mathf.Max(0, dur);
-            EditorUtility.SetDirty(currentAsset);
-            Repaint(); // 刷新 Duration 线的位置
-        }
-
-        GUILayout.Space(10);
-
-        // Buttons
-        GUILayout.BeginHorizontal();
-        if (GUILayout.Button("+ Add Keyframe", GUILayout.Height(24))) AddKeyframe();
-        GUI.enabled = selectedKeyIndex != -1;
-        if (GUILayout.Button("- Remove Selected", GUILayout.Height(24))) RemoveKeyframe();
-        GUI.enabled = true;
-        GUILayout.EndHorizontal();
-
-        GUILayout.Space(5);
-
-        // Keyframe Properties
+        // 如果选中了关键帧，显示关键帧详情
         if (selectedKeyIndex != -1 && selectedKeyIndex < currentAsset.keyframes.Count)
         {
             var key = currentAsset.keyframes[selectedKeyIndex];
             EditorGUI.BeginChangeCheck();
+
+            EditorGUILayout.LabelField($"Selected Keyframe ({key.time:F2}s)", EditorStyles.boldLabel);
 
             float newTime = EditorGUILayout.FloatField("Time", key.time);
             var newShape = (VectorShapeAsset)EditorGUILayout.ObjectField("Shape", key.shapeAsset, typeof(VectorShapeAsset), false);
             float newScale = EditorGUILayout.Slider("Scale", key.scale, 0f, 2f);
             bool newInstant = EditorGUILayout.Toggle("Is Instant", key.isInstant);
             int newOffset = EditorGUILayout.IntSlider("Align Offset", key.alignOffset, 0, 360);
-            AnimationCurve newCurve = EditorGUILayout.CurveField("Curve", key.curve);
+            AnimationCurve newCurve = EditorGUILayout.CurveField("Transition Curve", key.curve);
 
             if (EditorGUI.EndChangeCheck())
             {
                 Undo.RecordObject(currentAsset, "Modify Keyframe");
+
                 key.time = Mathf.Max(0, newTime);
                 key.shapeAsset = newShape;
                 key.scale = newScale;
@@ -433,26 +331,109 @@ public class VectorTimelineEditorWindow : EditorWindow
                 key.curve = newCurve;
 
                 currentAsset.keyframes[selectedKeyIndex] = key;
+
+                // 时间改变时重新排序
                 if (Mathf.Abs(newTime - key.time) > 0.001f) SortKeyframes();
+
                 EditorUtility.SetDirty(currentAsset);
                 UpdateScenePreview();
-                Repaint(); // 刷新关键帧位置
+                Repaint();
             }
         }
         else
         {
-            GUILayout.Label("Select a keyframe to edit.", EditorStyles.centeredGreyMiniLabel);
+            // 全局设置
+            EditorGUILayout.LabelField("Global Settings", EditorStyles.boldLabel);
+            EditorGUI.BeginChangeCheck();
+            var loopMode = (VectorLoopMode)EditorGUILayout.EnumPopup("Loop Mode", currentAsset.loopMode);
+            float dur = EditorGUILayout.FloatField("Total Duration", currentAsset.duration);
+
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RecordObject(currentAsset, "Global Settings");
+                currentAsset.loopMode = loopMode;
+                currentAsset.duration = Mathf.Max(0, dur);
+                EditorUtility.SetDirty(currentAsset);
+                Repaint();
+            }
+
+            GUILayout.FlexibleSpace();
+            GUILayout.Label("Select a keyframe to edit properties.", EditorStyles.centeredGreyMiniLabel);
         }
+
+        // 操作按钮
+        GUILayout.Space(10);
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("+ Add Keyframe", GUILayout.Height(24))) AddKeyframe();
+
+        GUI.enabled = selectedKeyIndex != -1;
+        if (GUILayout.Button("- Remove Selected", GUILayout.Height(24))) RemoveKeyframe();
+        GUI.enabled = true;
+        GUILayout.EndHorizontal();
+
         GUILayout.EndVertical();
     }
 
     // =========================================================
-    // Helpers
+    // 辅助 & 工具
     // =========================================================
+
+    void DrawToolbar()
+    {
+        GUILayout.BeginHorizontal(EditorStyles.toolbar);
+
+        GUILayout.Label("Asset:", GUILayout.Width(40));
+        EditorGUI.BeginChangeCheck();
+        var newAsset = (VectorTimelineAsset)EditorGUILayout.ObjectField(currentAsset, typeof(VectorTimelineAsset), false, GUILayout.Width(150));
+        if (EditorGUI.EndChangeCheck())
+        {
+            currentAsset = newAsset;
+            selectedKeyIndex = -1;
+            currentTime = 0;
+            isPlaying = false;
+        }
+
+        GUILayout.Space(10);
+        GUILayout.Label("Player:", GUILayout.Width(45));
+        var newPlayer = (VectorTimelinePlayer)EditorGUILayout.ObjectField(previewPlayer, typeof(VectorTimelinePlayer), true, GUILayout.Width(120));
+        if (newPlayer != previewPlayer) previewPlayer = newPlayer;
+
+        GUILayout.Space(10);
+        if (GUILayout.Button("⏮", EditorStyles.toolbarButton, GUILayout.Width(25))) { currentTime = 0; UpdateScenePreview(); }
+        bool newPlaying = GUILayout.Toggle(isPlaying, isPlaying ? "⏸" : "▶", EditorStyles.toolbarButton, GUILayout.Width(35));
+        if (newPlaying != isPlaying) { isPlaying = newPlaying; lastEditorTime = EditorApplication.timeSinceStartup; }
+        if (GUILayout.Button("⏹", EditorStyles.toolbarButton, GUILayout.Width(25))) { isPlaying = false; currentTime = 0; UpdateScenePreview(); }
+
+        GUILayout.FlexibleSpace();
+        GUILayout.Label("Zoom:", GUILayout.Width(40));
+        zoom = GUILayout.HorizontalSlider(zoom, 10f, 500f, GUILayout.Width(100));
+        GUILayout.EndHorizontal();
+    }
+
+    float GetMaxVisibleTime()
+    {
+        float maxT = currentAsset.duration > 0 ? currentAsset.duration : 0f;
+        if (currentAsset.keyframes.Count > 0)
+        {
+            float lastKeyTime = currentAsset.keyframes.Max(k => k.time);
+            if (lastKeyTime > maxT) maxT = lastKeyTime;
+        }
+        return Mathf.Max(maxT, 5.0f);
+    }
+
+    float GetTimeStep()
+    {
+        if (zoom > 300) return 0.1f;
+        if (zoom > 100) return 0.5f;
+        return 1.0f;
+    }
+
+    float TimeToPixel(float time) => time * zoom;
+    float PixelToTime(float pixel) => pixel / zoom;
 
     void InitStyles()
     {
-        if (keyframeStyle == null) keyframeStyle = new GUIStyle(GUI.skin.box);
+        if (keyframeStyle == null) keyframeStyle = new GUIStyle(GUI.skin.button);
     }
 
     void AddKeyframe()
@@ -466,11 +447,8 @@ public class VectorTimelineEditorWindow : EditorWindow
             alignOffset = 0,
             isInstant = false
         };
-        if (currentAsset.keyframes.Count > 0)
-        {
-            var last = currentAsset.keyframes[currentAsset.keyframes.Count - 1];
-            newKey.shapeAsset = last.shapeAsset;
-        }
+        if (currentAsset.keyframes.Count > 0) newKey.shapeAsset = currentAsset.keyframes.Last().shapeAsset;
+
         currentAsset.keyframes.Add(newKey);
         SortKeyframes();
         selectedKeyIndex = currentAsset.keyframes.IndexOf(newKey);
@@ -499,14 +477,10 @@ public class VectorTimelineEditorWindow : EditorWindow
 
     void UpdateScenePreview()
     {
-        if (previewPlayer == null)
-            previewPlayer = FindFirstObjectByType<VectorTimelinePlayer>();
-
+        if (previewPlayer == null) previewPlayer = FindFirstObjectByType<VectorTimelinePlayer>();
         if (previewPlayer != null && currentAsset != null)
         {
-            if (previewPlayer.timelineData != currentAsset)
-                previewPlayer.timelineData = currentAsset;
-
+            if (previewPlayer.timelineData != currentAsset) previewPlayer.timelineData = currentAsset;
             previewPlayer.Evaluate(currentTime);
             SceneView.RepaintAll();
         }
