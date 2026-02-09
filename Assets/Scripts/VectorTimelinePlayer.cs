@@ -18,7 +18,7 @@ public class VectorTimelinePlayer : MonoBehaviour {
     private float _currentTime = 0f;
     private bool _isPlaying = false;
 
-    // ✨ 新增：公开属性供编辑器读取（只读）
+    // ✨✨ 新增：公开属性供编辑器读取（只读） ✨✨
     public float CurrentTime => _currentTime;
     public bool IsPlaying => _isPlaying;
 
