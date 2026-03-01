@@ -18,7 +18,8 @@ public class VectorShapeCreator : MonoBehaviour {
     public VectorShapeType shapeType = VectorShapeType.Polygon;
 
     [OnValueChanged(nameof(UpdatePreview))]
-    [PropertyTooltip("决定形状（特别是描边和贝塞尔曲线）是否首尾相连")]
+    [ShowIf(nameof(IsBezier))]
+    [PropertyTooltip("决定贝塞尔曲线是否首尾相连。关闭时描边敞开，但填充仍然存在。")]
     public bool isClosed = true;
 
     [OnValueChanged(nameof(UpdatePreview))]
@@ -45,7 +46,6 @@ public class VectorShapeCreator : MonoBehaviour {
     [PropertyTooltip("在 Scene 视图中编辑。勾选后可使用鼠标点击交互。")]
     public bool enableBezierEdit = false;
 
-    // ✨ 新增：把初始化按钮移回主脚本，使用 TriInspector 渲染
     [ShowIf(nameof(IsBezier))]
     [Button(ButtonSizes.Medium, "Initialize Basic Curve")]
     [GUIColor(1f, 0.8f, 0.4f)]
@@ -92,6 +92,9 @@ public class VectorShapeCreator : MonoBehaviour {
     private bool IsStar => shapeType == VectorShapeType.Star;
     private bool IsPolygonOrStar => shapeType == VectorShapeType.Polygon || shapeType == VectorShapeType.Star;
 
+    // ✨ 核心判断：只有贝塞尔曲线且取消了 isClosed 时，才被视为真正的开放路径
+    private bool ActualClosed => shapeType != VectorShapeType.BezierPath || isClosed;
+
     // --- 内部缓存 ---
     private Mesh _mesh;
     private MeshFilter _mf;
@@ -101,6 +104,20 @@ public class VectorShapeCreator : MonoBehaviour {
         InitComponents();
         UpdatePreview();
     }
+
+#if UNITY_EDITOR
+    // 监听面板数值变化，实现实时预览
+    void OnValidate() {
+        if (!Application.isPlaying) {
+            UnityEditor.EditorApplication.delayCall += () => {
+                if (this != null) {
+                    UpdatePreview();
+                    UnityEditor.SceneView.RepaintAll();
+                }
+            };
+        }
+    }
+#endif
 
     void InitComponents() {
         if (!_mf) _mf = GetComponent<MeshFilter>();
@@ -120,7 +137,8 @@ public class VectorShapeCreator : MonoBehaviour {
             return;
         }
 
-        Vector2[] finalData = ResamplePoints(GenerateKeyPoints(), bakeResolution);
+        // ✨ 传入真实的闭合状态
+        Vector2[] finalData = ResamplePoints(GenerateKeyPoints(), bakeResolution, ActualClosed);
 
         targetAsset.vertices = finalData;
         targetAsset.resolution = bakeResolution;
@@ -132,7 +150,6 @@ public class VectorShapeCreator : MonoBehaviour {
         targetAsset.starPoints = starPoints;
         targetAsset.starInnerRatio = starInnerRatio;
 
-        // 深拷贝贝塞尔节点数据
         targetAsset.bezierNodes.Clear();
         foreach (var node in bezierNodes) {
             targetAsset.bezierNodes.Add(new BezierNode(node.position) {
@@ -185,7 +202,8 @@ public class VectorShapeCreator : MonoBehaviour {
         if (_mesh == null) InitComponents();
 
         Vector2[] keyPoints = GenerateKeyPoints();
-        Vector2[] finalVerts = ResamplePoints(keyPoints, bakeResolution);
+        // ✨ 传入真实的闭合状态
+        Vector2[] finalVerts = ResamplePoints(keyPoints, bakeResolution, ActualClosed);
 
         RenderMesh(finalVerts);
     }
@@ -197,7 +215,6 @@ public class VectorShapeCreator : MonoBehaviour {
         Gizmos.color = gizmoColor;
 
         float dotSize = 0.02f;
-        // vertices[0] 是中心点，跳过。只画内圈边缘点以显示分辨率
         int pointCount = bakeResolution;
         if (_mesh.vertices.Length > pointCount) {
             for (int i = 1; i <= pointCount; i++) {
@@ -245,8 +262,8 @@ public class VectorShapeCreator : MonoBehaviour {
         if (bezierNodes == null || bezierNodes.Count < 2) return new Vector2[0];
 
         List<Vector2> points = new List<Vector2>();
-        int segments = isClosed ? bezierNodes.Count : bezierNodes.Count - 1;
-        int samplesPerSegment = 30; // 内部高精度采样，供后续重采样使用
+        int segments = ActualClosed ? bezierNodes.Count : bezierNodes.Count - 1;
+        int samplesPerSegment = 30;
 
         for (int i = 0; i < segments; i++) {
             BezierNode p1 = bezierNodes[i];
@@ -258,8 +275,7 @@ public class VectorShapeCreator : MonoBehaviour {
             Vector2 p3_pos = p2.position;
 
             for (int j = 0; j <= samplesPerSegment; j++) {
-                // 防止段与段之间首尾相连时出现重复点
-                if (j == samplesPerSegment && (i < segments - 1 || isClosed)) continue;
+                if (j == samplesPerSegment && (i < segments - 1 || ActualClosed)) continue;
 
                 float t = j / (float)samplesPerSegment;
                 points.Add(CalculateCubicBezierPoint(t, p0_pos, p1_pos, p2_pos, p3_pos));
@@ -283,36 +299,42 @@ public class VectorShapeCreator : MonoBehaviour {
     }
 
     // =========================================================
-    // 底层算法：等距重采样与网格构建
+    // ✨ 底层算法：等距重采样与网格构建 (修复了多余的闭合线)
     // =========================================================
-    public static Vector2[] ResamplePoints(Vector2[] keyPoints, int targetCount) {
+    public static Vector2[] ResamplePoints(Vector2[] keyPoints, int targetCount, bool isClosedLoop) {
         if (keyPoints == null || keyPoints.Length < 2) return new Vector2[targetCount];
 
         Vector2[] result = new Vector2[targetCount];
         float perimeter = 0;
-        float[] segLens = new float[keyPoints.Length];
 
-        // 计算周长
-        for (int i = 0; i < keyPoints.Length; i++) {
-            // 如果是最后一个点且不闭合，其长度为0
-            if (i == keyPoints.Length - 1) {
-                float d = Vector2.Distance(keyPoints[i], keyPoints[0]);
-                segLens[i] = d; perimeter += d;
-            } else {
-                float d = Vector2.Distance(keyPoints[i], keyPoints[i + 1]);
-                segLens[i] = d; perimeter += d;
-            }
+        // 开放路径的有效线段数量比点数少1
+        int segmentCount = isClosedLoop ? keyPoints.Length : keyPoints.Length - 1;
+        float[] segLens = new float[segmentCount];
+
+        // 1. 计算正确的周长
+        for (int i = 0; i < segmentCount; i++) {
+            float d = Vector2.Distance(keyPoints[i], keyPoints[(i + 1) % keyPoints.Length]);
+            segLens[i] = d;
+            perimeter += d;
         }
 
-        float step = perimeter / targetCount;
+        // 2. 开放路径时，targetCount个顶点之间只有 (targetCount - 1) 个步长
+        float step = perimeter / (isClosedLoop ? targetCount : targetCount - 1);
         float traveled = 0;
         int curSeg = 0;
 
         for (int i = 0; i < targetCount; i++) {
-            while (traveled + step > segLens[curSeg] + 0.0001f && curSeg < keyPoints.Length - 1) {
+            // 兜底优化：如果是开放路径的最后一个顶点，直接精准赋值，消除浮点误差导致的短线
+            if (!isClosedLoop && i == targetCount - 1) {
+                result[i] = keyPoints[keyPoints.Length - 1];
+                continue;
+            }
+
+            while (traveled + step > segLens[curSeg] + 0.0001f && curSeg < segmentCount - 1) {
                 traveled -= segLens[curSeg];
                 curSeg++;
             }
+
             float t = segLens[curSeg] > 0.0001f ? traveled / segLens[curSeg] : 0;
             int nextNode = (curSeg + 1) % keyPoints.Length;
             result[i] = Vector2.Lerp(keyPoints[curSeg], keyPoints[nextNode], t);
@@ -326,9 +348,9 @@ public class VectorShapeCreator : MonoBehaviour {
         int count = polyVerts.Length;
         if (count < 3) return;
 
-        int strokeSegments = isClosed ? count : count - 1;
+        // ✨ 描边数量：闭合时画完整，敞开时少画最后连接的那一条
+        int strokeSegments = ActualClosed ? count : count - 1;
 
-        // 顶点总数：1(中心) + count(内圈) + count(描边内) + count(描边外)
         int totalVerts = enableStroke ? (3 * count + 1) : (count + 1);
         int totalTris = enableStroke ? (count * 3 + strokeSegments * 6) : (count * 3);
 
@@ -349,7 +371,7 @@ public class VectorShapeCreator : MonoBehaviour {
                 Vector2 pNext = polyVerts[(i + 1) % count];
 
                 // 开放路径的首尾法线处理
-                if (!isClosed) {
+                if (!ActualClosed) {
                     if (i == 0) pPrev = polyVerts[0] - (polyVerts[1] - polyVerts[0]);
                     if (i == count - 1) pNext = polyVerts[count - 1] + (polyVerts[count - 1] - polyVerts[count - 2]);
                 }
@@ -373,12 +395,12 @@ public class VectorShapeCreator : MonoBehaviour {
         for (int i = 0; i < count; i++) {
             int next = (i + 1) % count;
 
-            // 填充三角形 (永远围绕中心点闭合)
+            // 填充三角形 (永远围绕中心点闭合，即便是不闭合的贝塞尔曲线，填充也会强制向中心收拢成扇形)
             t[i * 3] = 0;
             t[i * 3 + 1] = i + 1;
             t[i * 3 + 2] = next + 1;
 
-            // 描边三角形 (根据 isClosed 决定是否生成最后一段相连的 Quad)
+            // 描边三角形 (如果是开放路径，当 i == count-1 时，条件不满足，跳过最后一段直线的渲染)
             if (enableStroke && i < strokeSegments) {
                 int inner1 = count + 1 + i;
                 int inner2 = count + 1 + next;
@@ -400,20 +422,4 @@ public class VectorShapeCreator : MonoBehaviour {
         _mesh.triangles = t;
         _mesh.colors = c;
     }
-
-#if UNITY_EDITOR
-    // 当在 Inspector 面板中修改任何数值时，Unity 自动调用此方法
-    void OnValidate() {
-        if (!Application.isPlaying) {
-            // 使用 delayCall 是为了避免 Unity 警告我们在 OnValidate 中修改 Mesh
-            UnityEditor.EditorApplication.delayCall += () => {
-                if (this != null) {
-                    UpdatePreview();
-                    // 强制刷新场景视图，让线条也同步更新
-                    UnityEditor.SceneView.RepaintAll();
-                }
-            };
-        }
-    }
-#endif
 }
