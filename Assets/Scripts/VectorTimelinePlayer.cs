@@ -42,7 +42,6 @@ public class VectorTimelinePlayer : MonoBehaviour {
     void InitializeMesh() {
         _mf = GetComponent<MeshFilter>();
         _mr = GetComponent<MeshRenderer>();
-
         if (_mesh == null) {
             _mesh = new Mesh();
             _mesh.name = "TimelineMesh";
@@ -50,9 +49,7 @@ public class VectorTimelinePlayer : MonoBehaviour {
         } else if (_mf.sharedMesh != _mesh) {
             _mf.mesh = _mesh;
         }
-
-        if (_mr.sharedMaterial == null)
-            _mr.sharedMaterial = new Material(Shader.Find("Sprites/Default"));
+        if (_mr.sharedMaterial == null) _mr.sharedMaterial = new Material(Shader.Find("Sprites/Default"));
     }
 
     void Start() {
@@ -165,13 +162,19 @@ public class VectorTimelinePlayer : MonoBehaviour {
 
         if (vertsA == null || vertsB == null) return;
 
+        // ✨ 获取真实的闭合状态 
+        bool closedA = shapeA == null || shapeA.shapeType != VectorShapeType.BezierPath || shapeA.isClosed;
+        bool closedB = shapeB == null || shapeB.shapeType != VectorShapeType.BezierPath || shapeB.isClosed;
+        bool actualClosed = closedA && closedB;
+
         int resA = vertsA.Length;
         int resB = vertsB.Length;
 
+        int strokeSegments = actualClosed ? resA : resA - 1;
         int totalVerts = enableStroke ? (3 * resA + 1) : (resA + 1);
-        int totalTris = enableStroke ? (resA * 9) : (resA * 3);
+        int totalTris = enableStroke ? (resA * 3 + strokeSegments * 6) : (resA * 3);
 
-        if (_vertices == null || _vertices.Length != totalVerts) {
+        if (_vertices == null || _vertices.Length != totalVerts || _triangles == null || _triangles.Length != totalTris) {
             _vertices = new Vector3[totalVerts];
             _colors = new Color[totalVerts];
             _triangles = new int[totalTris];
@@ -182,7 +185,7 @@ public class VectorTimelinePlayer : MonoBehaviour {
                 _triangles[i * 3 + 1] = i + 1;
                 _triangles[i * 3 + 2] = next + 1;
 
-                if (enableStroke) {
+                if (enableStroke && i < strokeSegments) {
                     int inner1 = resA + 1 + i;
                     int inner2 = resA + 1 + next;
                     int outer1 = 2 * resA + 1 + i;
@@ -223,12 +226,17 @@ public class VectorTimelinePlayer : MonoBehaviour {
                 if (enableStroke) {
                     Vector2 pPrev = currentPos[(i - 1 + resA) % resA];
                     Vector2 pNext = currentPos[(i + 1) % resA];
+
+                    // ✨ 修复开放路径两端的法线扭曲
+                    if (!actualClosed) {
+                        if (i == 0) pPrev = currentPos[0] - (currentPos[1] - currentPos[0]);
+                        if (i == resA - 1) pNext = currentPos[resA - 1] + (currentPos[resA - 1] - currentPos[resA - 2]);
+                    }
+
                     Vector2 dir = (pNext - pPrev).normalized;
                     if (dir == Vector2.zero) dir = Vector2.right;
                     Vector2 normal = new Vector2(dir.y, -dir.x);
 
-                    // 注意：这里由于 shape 本身自带 scale，strokeWidth 最好也乘上 currentScale
-                    // 这样形变缩放时，描边也会同步缩放，表现更自然。
                     Vector2 outerP = p + normal * (strokeWidth * currentScale);
 
                     _vertices[resA + 1 + i] = new Vector3(p.x, p.y, 0);
@@ -241,10 +249,7 @@ public class VectorTimelinePlayer : MonoBehaviour {
 
         _mesh.vertices = _vertices;
         _mesh.colors = _colors;
-
-        if (_mesh.triangles.Length != _triangles.Length)
-            _mesh.triangles = _triangles;
-
+        if (_mesh.triangles.Length != _triangles.Length) _mesh.triangles = _triangles;
         _mesh.RecalculateBounds();
     }
 }

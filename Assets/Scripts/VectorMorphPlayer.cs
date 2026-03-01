@@ -83,26 +83,30 @@ public class VectorMorphPlayer : MonoBehaviour {
 
         if (src.Length != dst.Length) return;
 
-        int res = src.Length;
-        // 顶点数：1个中心点 + 内圈填充点 + (可选: 描边内圈点 + 描边外圈点)
-        int vertCount = enableStroke ? (3 * res + 1) : (res + 1);
-        int triCount = enableStroke ? (res * 9) : (res * 3); // 填充3个 + 描边Quad(6个)
+        // ✨ 获取真实的闭合状态 (如果任一是开放的贝塞尔，则视为开放)
+        bool closedSrc = morphClip.sourceShape.shapeType != VectorShapeType.BezierPath || morphClip.sourceShape.isClosed;
+        bool closedDst = morphClip.targetShape.shapeType != VectorShapeType.BezierPath || morphClip.targetShape.isClosed;
+        bool actualClosed = closedSrc && closedDst;
 
-        if (_vertices == null || _vertices.Length != vertCount) {
+        int res = src.Length;
+        int strokeSegments = actualClosed ? res : res - 1;
+
+        int vertCount = enableStroke ? (3 * res + 1) : (res + 1);
+        int triCount = enableStroke ? (res * 3 + strokeSegments * 6) : (res * 3);
+
+        // 如果拓扑结构发生变化（比如从闭合变为了开放），则重新生成索引
+        if (_vertices == null || _vertices.Length != vertCount || _triangles == null || _triangles.Length != triCount) {
             _vertices = new Vector3[vertCount];
             _colors = new Color[vertCount];
             _triangles = new int[triCount];
 
-            // 预生成三角形索引
             for (int i = 0; i < res; i++) {
                 int next = (i + 1) % res;
-                // 中心填充三角形
                 _triangles[i * 3] = 0;
                 _triangles[i * 3 + 1] = i + 1;
                 _triangles[i * 3 + 2] = next + 1;
 
-                if (enableStroke) {
-                    // 描边四边形 (由两个三角形组成)
+                if (enableStroke && i < strokeSegments) {
                     int inner1 = res + 1 + i;
                     int inner2 = res + 1 + next;
                     int outer1 = 2 * res + 1 + i;
@@ -112,7 +116,6 @@ public class VectorMorphPlayer : MonoBehaviour {
                     _triangles[tIdx] = inner1;
                     _triangles[tIdx + 1] = outer1;
                     _triangles[tIdx + 2] = outer2;
-
                     _triangles[tIdx + 3] = inner1;
                     _triangles[tIdx + 4] = outer2;
                     _triangles[tIdx + 5] = inner2;
@@ -121,7 +124,6 @@ public class VectorMorphPlayer : MonoBehaviour {
             _mesh.Clear();
         }
 
-        // 预计算当前的形状顶点
         Vector2[] currentPos = new Vector2[res];
         for (int i = 0; i < res; i++) {
             int offsetIndex = (i + morphClip.alignOffset) % res;
@@ -129,32 +131,31 @@ public class VectorMorphPlayer : MonoBehaviour {
             currentPos[i] = Vector2.Lerp(src[i], dst[offsetIndex], t);
         }
 
-        // 填充中心点
         _vertices[0] = Vector3.zero;
         _colors[0] = fillColor;
 
         for (int i = 0; i < res; i++) {
             Vector2 p = currentPos[i];
-
-            // 填充顶点
             _vertices[i + 1] = new Vector3(p.x, p.y, 0);
             _colors[i + 1] = fillColor;
 
             if (enableStroke) {
-                // 计算该顶点的外扩法线 (利用前后相邻点求平分法线)
                 Vector2 pPrev = currentPos[(i - 1 + res) % res];
                 Vector2 pNext = currentPos[(i + 1) % res];
-                Vector2 dir = (pNext - pPrev).normalized;
-                if (dir == Vector2.zero) dir = Vector2.right; // 容错处理
-                Vector2 normal = new Vector2(dir.y, -dir.x); // 逆时针向外的法向量
 
+                // ✨ 修复开放路径两端的法线扭曲
+                if (!actualClosed) {
+                    if (i == 0) pPrev = currentPos[0] - (currentPos[1] - currentPos[0]);
+                    if (i == res - 1) pNext = currentPos[res - 1] + (currentPos[res - 1] - currentPos[res - 2]);
+                }
+
+                Vector2 dir = (pNext - pPrev).normalized;
+                if (dir == Vector2.zero) dir = Vector2.right;
+                Vector2 normal = new Vector2(dir.y, -dir.x);
                 Vector2 outerP = p + normal * strokeWidth;
 
-                // 描边内圈顶点 (位置与填充边缘重合，但颜色不同)
                 _vertices[res + 1 + i] = new Vector3(p.x, p.y, 0);
                 _colors[res + 1 + i] = strokeColor;
-
-                // 描边外圈顶点
                 _vertices[2 * res + 1 + i] = new Vector3(outerP.x, outerP.y, 0);
                 _colors[2 * res + 1 + i] = strokeColor;
             }
@@ -162,10 +163,7 @@ public class VectorMorphPlayer : MonoBehaviour {
 
         _mesh.vertices = _vertices;
         _mesh.colors = _colors;
-
-        if (_mesh.triangles.Length != _triangles.Length)
-            _mesh.triangles = _triangles;
-
+        if (_mesh.triangles.Length != _triangles.Length) _mesh.triangles = _triangles;
         _mesh.RecalculateBounds();
     }
 }

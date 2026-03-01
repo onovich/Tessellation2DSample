@@ -45,7 +45,7 @@ MonoBehaviour:
       m_RotationOrder: 4
     alignOffset: 20
   - time: 1
-    shapeAsset: {fileID: 11400000, guid: 4046c0e45ed1545a8a917f77682027ff, type: 2}
+    shapeAsset: {fileID: 11400000, guid: 787114b7928dc964bbd5958fc6b2206a, type: 2}
     scale: 1
     isInstant: 0
     curve:
