@@ -22,7 +22,6 @@ public class VectorTimelinePlayer : MonoBehaviour {
 
     private float _currentTime = 0f;
     private bool _isPlaying = false;
-
     public float CurrentTime => _currentTime;
     public bool IsPlaying => _isPlaying;
 
@@ -33,7 +32,6 @@ public class VectorTimelinePlayer : MonoBehaviour {
     private Color[] _colors;
     private int[] _triangles;
 
-    // ✨ 状态缓存
     private int _lastResA = -1;
     private int _lastResB = -1;
     private int _lastOffset = -1;
@@ -75,6 +73,32 @@ public class VectorTimelinePlayer : MonoBehaviour {
         }
     }
 
+    private void GetStrokeData(Vector2[] pts, int i, bool isClosed, out Vector2 normal, out float miter) {
+        int res = pts.Length;
+        Vector2 p = pts[i];
+        Vector2 pPrev = pts[(i - 1 + res) % res];
+        Vector2 pNext = pts[(i + 1) % res];
+
+        if (!isClosed) {
+            if (i == 0) pPrev = p - (pNext - p);
+            if (i == res - 1) pNext = p + (p - pPrev);
+        }
+
+        Vector2 d1 = (p - pPrev).normalized;
+        Vector2 d2 = (pNext - p).normalized;
+        Vector2 tangent = (d1 + d2).normalized;
+
+        if (tangent.sqrMagnitude < 0.01f) tangent = new Vector2(-d1.y, d1.x);
+
+        normal = new Vector2(tangent.y, -tangent.x);
+
+        miter = 1f;
+        float dot = Vector2.Dot(d1, tangent);
+        if (Mathf.Abs(dot) > 0.05f) {
+            miter = Mathf.Clamp(1f / dot, 0.1f, 3f);
+        }
+    }
+
     public void Evaluate(float rawTime) {
         if (timelineData == null || timelineData.keyframes == null || timelineData.keyframes.Count == 0) {
             if (_mesh != null) _mesh.Clear(); return;
@@ -86,14 +110,11 @@ public class VectorTimelinePlayer : MonoBehaviour {
         switch (timelineData.loopMode) {
             case VectorLoopMode.Once:
                 tLoop = Mathf.Clamp(rawTime, 0, duration);
-                if (rawTime > duration) _isPlaying = false;
-                break;
+                if (rawTime > duration) _isPlaying = false; break;
             case VectorLoopMode.Loop:
-                tLoop = Mathf.Repeat(rawTime, duration);
-                break;
+                tLoop = Mathf.Repeat(rawTime, duration); break;
             case VectorLoopMode.PingPong:
-                tLoop = Mathf.PingPong(rawTime, duration);
-                break;
+                tLoop = Mathf.PingPong(rawTime, duration); break;
         }
 
         var allKeys = timelineData.keyframes;
@@ -107,8 +128,7 @@ public class VectorTimelinePlayer : MonoBehaviour {
         if (prevIndex == -1) {
             var first = allKeys[0];
             if (first.time > duration) { _mesh.Clear(); return; }
-            RenderShape(first.shapeAsset, first.shapeAsset, 0, first.scale, first.scale, 0);
-            return;
+            RenderShape(first.shapeAsset, first.shapeAsset, 0, first.scale, first.scale, 0); return;
         }
 
         bool isNextKeyOutOfBounds = (prevIndex + 1 < allKeys.Count) && (allKeys[prevIndex + 1].time > duration);
@@ -141,8 +161,7 @@ public class VectorTimelinePlayer : MonoBehaviour {
         TimelineKeyframe nextKey = allKeys[prevIndex + 1];
 
         if (nextKey.isInstant || (nextKey.time - prevKey.time) < 0.0001f) {
-            RenderShape(nextKey.shapeAsset, nextKey.shapeAsset, 0, nextKey.scale, nextKey.scale, 0);
-            return;
+            RenderShape(nextKey.shapeAsset, nextKey.shapeAsset, 0, nextKey.scale, nextKey.scale, 0); return;
         }
 
         float segmentDuration = nextKey.time - prevKey.time;
@@ -162,8 +181,6 @@ public class VectorTimelinePlayer : MonoBehaviour {
 
         bool closedA = shapeA == null || shapeA.shapeType != VectorShapeType.BezierPath || shapeA.isClosed;
         bool closedB = shapeB == null || shapeB.shapeType != VectorShapeType.BezierPath || shapeB.isClosed;
-
-        // ✨ 防止孤岛
         int activeOffset = (!closedA && !closedB) ? 0 : offset;
 
         int resA = vertsA.Length;
@@ -173,9 +190,7 @@ public class VectorTimelinePlayer : MonoBehaviour {
         for (int i = 0; i < resA; i++) {
             int idxB = (i + activeOffset) % resB;
             if (idxB < 0) idxB += resB;
-            bool isGapA = (!closedA && i == resA - 1);
-            bool isGapB = (!closedB && idxB == resB - 1);
-            if (isGapA || isGapB) hiddenCount++;
+            if ((!closedA && i == resA - 1) || (!closedB && idxB == resB - 1)) hiddenCount++;
         }
 
         int strokeSegments = resA - hiddenCount;
@@ -189,9 +204,7 @@ public class VectorTimelinePlayer : MonoBehaviour {
             _lastResA = resA; _lastResB = resB; _lastOffset = activeOffset;
             _lastClosedA = closedA; _lastClosedB = closedB; _lastEnableStroke = enableStroke;
 
-            _vertices = new Vector3[totalVerts];
-            _colors = new Color[totalVerts];
-            _triangles = new int[totalTris];
+            _vertices = new Vector3[totalVerts]; _colors = new Color[totalVerts]; _triangles = new int[totalTris];
 
             int currentTriIdx = resA * 3;
             for (int i = 0; i < resA; i++) {
@@ -200,19 +213,15 @@ public class VectorTimelinePlayer : MonoBehaviour {
 
                 int idxB = (i + activeOffset) % resB;
                 if (idxB < 0) idxB += resB;
-                bool isGapA = (!closedA && i == resA - 1);
-                bool isGapB = (!closedB && idxB == resB - 1);
 
-                if (enableStroke && !(isGapA || isGapB)) {
+                if (enableStroke && !((!closedA && i == resA - 1) || (!closedB && idxB == resB - 1))) {
                     int inner1 = resA + 1 + i; int inner2 = resA + 1 + next;
                     int outer1 = 2 * resA + 1 + i; int outer2 = 2 * resA + 1 + next;
                     _triangles[currentTriIdx++] = inner1; _triangles[currentTriIdx++] = outer1; _triangles[currentTriIdx++] = outer2;
                     _triangles[currentTriIdx++] = inner1; _triangles[currentTriIdx++] = outer2; _triangles[currentTriIdx++] = inner2;
                 }
             }
-            _mesh.Clear();
-            _mesh.vertices = _vertices;
-            _mesh.triangles = _triangles;
+            _mesh.Clear(); _mesh.vertices = _vertices; _mesh.triangles = _triangles;
         }
 
         float currentScale = Mathf.Lerp(scaleA, scaleB, t);
@@ -220,50 +229,35 @@ public class VectorTimelinePlayer : MonoBehaviour {
         if (currentScale < 0.001f) {
             for (int i = 0; i < totalVerts; i++) _vertices[i] = Vector3.zero;
         } else {
-            _vertices[0] = Vector3.zero;
-            _colors[0] = fillColor;
+            _vertices[0] = Vector3.zero; _colors[0] = fillColor;
 
-            Vector2[] currentPos = new Vector2[resA];
             for (int i = 0; i < resA; i++) {
                 int idxB = (i + activeOffset) % resB;
                 if (idxB < 0) idxB += resB;
-                currentPos[i] = Vector2.Lerp(vertsA[i], vertsB[idxB], t) * currentScale;
-            }
 
-            for (int i = 0; i < resA; i++) {
-                _vertices[i + 1] = new Vector3(currentPos[i].x, currentPos[i].y, 0);
+                Vector2 innerA = vertsA[i] * scaleA;
+                Vector2 innerB = vertsB[idxB] * scaleB;
+                Vector2 currentInner = Vector2.Lerp(innerA, innerB, t);
+
+                _vertices[i + 1] = new Vector3(currentInner.x, currentInner.y, 0);
                 _colors[i + 1] = fillColor;
 
                 if (enableStroke) {
-                    Vector2 pPrev = currentPos[(i - 1 + resA) % resA];
-                    Vector2 pNext = currentPos[(i + 1) % resA];
+                    GetStrokeData(vertsA, i, closedA, out Vector2 normA, out float miterA);
+                    GetStrokeData(vertsB, idxB, closedB, out Vector2 normB, out float miterB);
 
-                    int idxB = (i + activeOffset) % resB;
-                    if (idxB < 0) idxB += resB;
-                    int prevI = (i - 1 + resA) % resA;
-                    int prevIdxB = (prevI + activeOffset) % resB;
-                    if (prevIdxB < 0) prevIdxB += resB;
+                    float angleA = Mathf.Atan2(normA.y, normA.x) * Mathf.Rad2Deg;
+                    float angleB = Mathf.Atan2(normB.y, normB.x) * Mathf.Rad2Deg;
+                    float currentAngle = Mathf.LerpAngle(angleA, angleB, t) * Mathf.Deg2Rad;
 
-                    bool isBeforeGap = (!closedA && i == resA - 1) || (!closedB && idxB == resB - 1);
-                    bool isAfterGap = (!closedA && prevI == resA - 1) || (!closedB && prevIdxB == resB - 1);
+                    Vector2 currentNorm = new Vector2(Mathf.Cos(currentAngle), Mathf.Sin(currentAngle));
+                    float currentMiter = Mathf.Lerp(miterA, miterB, t);
 
-                    if (isBeforeGap && isAfterGap) {
-                        pNext = currentPos[i] + Vector2.right; pPrev = currentPos[i] - Vector2.right;
-                    } else if (isBeforeGap) {
-                        pNext = currentPos[i] + (currentPos[i] - pPrev);
-                    } else if (isAfterGap) {
-                        pPrev = currentPos[i] - (pNext - currentPos[i]);
-                    }
+                    Vector2 currentOuter = currentInner + currentNorm * (strokeWidth * currentScale * currentMiter);
 
-                    Vector2 dir = (pNext - pPrev).normalized;
-                    if (dir == Vector2.zero) dir = Vector2.right;
-                    Vector2 normal = new Vector2(dir.y, -dir.x);
-
-                    Vector2 outerP = currentPos[i] + normal * (strokeWidth * currentScale);
-
-                    _vertices[resA + 1 + i] = new Vector3(currentPos[i].x, currentPos[i].y, 0);
+                    _vertices[resA + 1 + i] = new Vector3(currentInner.x, currentInner.y, 0);
                     _colors[resA + 1 + i] = strokeColor;
-                    _vertices[2 * resA + 1 + i] = new Vector3(outerP.x, outerP.y, 0);
+                    _vertices[2 * resA + 1 + i] = new Vector3(currentOuter.x, currentOuter.y, 0);
                     _colors[2 * resA + 1 + i] = strokeColor;
                 }
             }

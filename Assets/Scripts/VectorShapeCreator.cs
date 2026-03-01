@@ -344,11 +344,40 @@ public class VectorShapeCreator : MonoBehaviour {
         return result;
     }
 
+    private Vector2 GetOuterPoint(Vector2[] pts, int i, bool isClosed, float width) {
+        int res = pts.Length;
+        Vector2 p = pts[i];
+        Vector2 pPrev = pts[(i - 1 + res) % res];
+        Vector2 pNext = pts[(i + 1) % res];
+
+        if (!isClosed) {
+            if (i == 0) pPrev = p - (pNext - p);
+            if (i == res - 1) pNext = p + (p - pPrev);
+        }
+
+        Vector2 d1 = (p - pPrev).normalized;
+        Vector2 d2 = (pNext - p).normalized;
+        Vector2 tangent = (d1 + d2).normalized;
+
+        if (tangent.sqrMagnitude < 0.01f) {
+            tangent = new Vector2(-d1.y, d1.x);
+        }
+
+        Vector2 normal = new Vector2(tangent.y, -tangent.x);
+
+        float miter = 1f;
+        float dot = Vector2.Dot(d1, tangent);
+        if (Mathf.Abs(dot) > 0.05f) {
+            miter = 1f / dot;
+            miter = Mathf.Clamp(miter, 0.1f, 3f);
+        }
+        return p + normal * (width * miter);
+    }
+
     void RenderMesh(Vector2[] polyVerts) {
         int count = polyVerts.Length;
         if (count < 3) return;
 
-        // ✨ 描边数量：闭合时画完整，敞开时少画最后连接的那一条
         int strokeSegments = ActualClosed ? count : count - 1;
 
         int totalVerts = enableStroke ? (3 * count + 1) : (count + 1);
@@ -358,49 +387,27 @@ public class VectorShapeCreator : MonoBehaviour {
         int[] t = new int[totalTris];
         Color[] c = new Color[totalVerts];
 
-        // 中心点填充
         v[0] = Vector3.zero; c[0] = fillColor;
 
-        // 1. 生成所有顶点
         for (int i = 0; i < count; i++) {
-            v[i + 1] = polyVerts[i];
+            Vector2 currentInner = polyVerts[i];
+            v[i + 1] = currentInner;
             c[i + 1] = fillColor;
 
             if (enableStroke) {
-                Vector2 pPrev = polyVerts[(i - 1 + count) % count];
-                Vector2 pNext = polyVerts[(i + 1) % count];
+                Vector2 currentOuter = GetOuterPoint(polyVerts, i, ActualClosed, strokeWidth);
 
-                // 开放路径的首尾法线处理
-                if (!ActualClosed) {
-                    if (i == 0) pPrev = polyVerts[0] - (polyVerts[1] - polyVerts[0]);
-                    if (i == count - 1) pNext = polyVerts[count - 1] + (polyVerts[count - 1] - polyVerts[count - 2]);
-                }
-
-                Vector2 dir = (pNext - pPrev).normalized;
-                if (dir == Vector2.zero) dir = Vector2.right;
-                Vector2 normal = new Vector2(dir.y, -dir.x);
-                Vector2 outerP = polyVerts[i] + normal * strokeWidth;
-
-                int strokeInnerIdx = count + 1 + i;
-                int strokeOuterIdx = 2 * count + 1 + i;
-
-                v[strokeInnerIdx] = polyVerts[i];
-                c[strokeInnerIdx] = strokeColor;
-                v[strokeOuterIdx] = outerP;
-                c[strokeOuterIdx] = strokeColor;
+                v[count + 1 + i] = currentInner;
+                c[count + 1 + i] = strokeColor;
+                v[2 * count + 1 + i] = currentOuter;
+                c[2 * count + 1 + i] = strokeColor;
             }
         }
 
-        // 2. 生成三角形拓扑
         for (int i = 0; i < count; i++) {
             int next = (i + 1) % count;
+            t[i * 3] = 0; t[i * 3 + 1] = i + 1; t[i * 3 + 2] = next + 1;
 
-            // 填充三角形 (永远围绕中心点闭合，即便是不闭合的贝塞尔曲线，填充也会强制向中心收拢成扇形)
-            t[i * 3] = 0;
-            t[i * 3 + 1] = i + 1;
-            t[i * 3 + 2] = next + 1;
-
-            // 描边三角形 (如果是开放路径，当 i == count-1 时，条件不满足，跳过最后一段直线的渲染)
             if (enableStroke && i < strokeSegments) {
                 int inner1 = count + 1 + i;
                 int inner2 = count + 1 + next;
@@ -408,12 +415,8 @@ public class VectorShapeCreator : MonoBehaviour {
                 int outer2 = 2 * count + 1 + next;
 
                 int tIdx = count * 3 + i * 6;
-                t[tIdx] = inner1;
-                t[tIdx + 1] = outer1;
-                t[tIdx + 2] = outer2;
-                t[tIdx + 3] = inner1;
-                t[tIdx + 4] = outer2;
-                t[tIdx + 5] = inner2;
+                t[tIdx] = inner1; t[tIdx + 1] = outer1; t[tIdx + 2] = outer2;
+                t[tIdx + 3] = inner1; t[tIdx + 4] = outer2; t[tIdx + 5] = inner2;
             }
         }
 

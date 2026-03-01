@@ -20,7 +20,6 @@ public class VectorMorphPlayer : MonoBehaviour {
     private Mesh _mesh;
     private MeshFilter _mf;
     private MeshRenderer _mr;
-
     private Vector3[] _vertices;
     private Color[] _colors;
     private int[] _triangles;
@@ -28,7 +27,6 @@ public class VectorMorphPlayer : MonoBehaviour {
     private float _timer = 0;
     private bool _isPlaying = false;
 
-    // ✨ 状态缓存：仅当拓扑结构发生变化时才重建三角形数组，大幅优化性能
     private int _lastRes = -1;
     private int _lastOffset = -1;
     private bool _lastClosedA = false;
@@ -52,10 +50,8 @@ public class VectorMorphPlayer : MonoBehaviour {
             _timer += Time.deltaTime;
             float tRaw = _timer / morphClip.duration;
             if (loop && tRaw > 1f) { _timer = 0; tRaw = 0; }
-
             float t = Mathf.Clamp01(tRaw);
             UpdateMesh(morphClip.curve.Evaluate(t));
-
             if (t >= 1f && !loop) _isPlaying = false;
         } else if (!Application.isPlaying) {
             UpdateMesh(progress);
@@ -68,6 +64,33 @@ public class VectorMorphPlayer : MonoBehaviour {
         _isPlaying = true;
     }
 
+    // ✨ 提取法线和Miter信息，而不是直接返回位置
+    private void GetStrokeData(Vector2[] pts, int i, bool isClosed, out Vector2 normal, out float miter) {
+        int res = pts.Length;
+        Vector2 p = pts[i];
+        Vector2 pPrev = pts[(i - 1 + res) % res];
+        Vector2 pNext = pts[(i + 1) % res];
+
+        if (!isClosed) {
+            if (i == 0) pPrev = p - (pNext - p);
+            if (i == res - 1) pNext = p + (p - pPrev);
+        }
+
+        Vector2 d1 = (p - pPrev).normalized;
+        Vector2 d2 = (pNext - p).normalized;
+        Vector2 tangent = (d1 + d2).normalized;
+
+        if (tangent.sqrMagnitude < 0.01f) tangent = new Vector2(-d1.y, d1.x);
+
+        normal = new Vector2(tangent.y, -tangent.x);
+
+        miter = 1f;
+        float dot = Vector2.Dot(d1, tangent);
+        if (Mathf.Abs(dot) > 0.05f) {
+            miter = Mathf.Clamp(1f / dot, 0.1f, 3f);
+        }
+    }
+
     void UpdateMesh(float t) {
         if (morphClip == null || morphClip.sourceShape == null || morphClip.targetShape == null) return;
         if (morphClip.sourceShape.vertices == null || morphClip.targetShape.vertices == null) return;
@@ -77,21 +100,15 @@ public class VectorMorphPlayer : MonoBehaviour {
         if (src.Length != dst.Length) return;
 
         int res = src.Length;
-
         bool closedA = morphClip.sourceShape.shapeType != VectorShapeType.BezierPath || morphClip.sourceShape.isClosed;
         bool closedB = morphClip.targetShape.shapeType != VectorShapeType.BezierPath || morphClip.targetShape.isClosed;
-
-        // ✨ 防呆保护：如果两个都是开放路径，强制偏移为 0，防止拓扑撕裂产生孤岛
         int activeOffset = (!closedA && !closedB) ? 0 : morphClip.alignOffset;
 
-        // 动态计算隐藏的线段数量
         int hiddenCount = 0;
         for (int i = 0; i < res; i++) {
             int idxB = (i + activeOffset) % res;
             if (idxB < 0) idxB += res;
-            bool isGapA = (!closedA && i == res - 1);
-            bool isGapB = (!closedB && idxB == res - 1);
-            if (isGapA || isGapB) hiddenCount++;
+            if ((!closedA && i == res - 1) || (!closedB && idxB == res - 1)) hiddenCount++;
         }
 
         int strokeSegments = res - hiddenCount;
@@ -105,9 +122,7 @@ public class VectorMorphPlayer : MonoBehaviour {
             _lastRes = res; _lastOffset = activeOffset;
             _lastClosedA = closedA; _lastClosedB = closedB; _lastEnableStroke = enableStroke;
 
-            _vertices = new Vector3[vertCount];
-            _colors = new Color[vertCount];
-            _triangles = new int[triCount];
+            _vertices = new Vector3[vertCount]; _colors = new Color[vertCount]; _triangles = new int[triCount];
 
             int currentTriIdx = res * 3;
             for (int i = 0; i < res; i++) {
@@ -116,65 +131,47 @@ public class VectorMorphPlayer : MonoBehaviour {
 
                 int idxB = (i + activeOffset) % res;
                 if (idxB < 0) idxB += res;
-                bool isGapA = (!closedA && i == res - 1);
-                bool isGapB = (!closedB && idxB == res - 1);
 
-                // ✨ 核心判断：只有当前线段既不跨越 A 的缺口，也不跨越 B 的缺口，才生成描边
-                if (enableStroke && !(isGapA || isGapB)) {
+                if (enableStroke && !((!closedA && i == res - 1) || (!closedB && idxB == res - 1))) {
                     int inner1 = res + 1 + i; int inner2 = res + 1 + next;
                     int outer1 = 2 * res + 1 + i; int outer2 = 2 * res + 1 + next;
                     _triangles[currentTriIdx++] = inner1; _triangles[currentTriIdx++] = outer1; _triangles[currentTriIdx++] = outer2;
                     _triangles[currentTriIdx++] = inner1; _triangles[currentTriIdx++] = outer2; _triangles[currentTriIdx++] = inner2;
                 }
             }
-            _mesh.Clear();
-            _mesh.vertices = _vertices; // 先占位，防止越界报错
-            _mesh.triangles = _triangles;
-        }
-
-        Vector2[] currentPos = new Vector2[res];
-        for (int i = 0; i < res; i++) {
-            int idxB = (i + activeOffset) % res;
-            if (idxB < 0) idxB += res;
-            currentPos[i] = Vector2.Lerp(src[i], dst[idxB], t);
+            _mesh.Clear(); _mesh.vertices = _vertices; _mesh.triangles = _triangles;
         }
 
         _vertices[0] = Vector3.zero; _colors[0] = fillColor;
 
         for (int i = 0; i < res; i++) {
-            _vertices[i + 1] = new Vector3(currentPos[i].x, currentPos[i].y, 0);
+            int idxB = (i + activeOffset) % res;
+            if (idxB < 0) idxB += res;
+
+            Vector2 innerA = src[i];
+            Vector2 innerB = dst[idxB];
+            Vector2 currentInner = Vector2.Lerp(innerA, innerB, t);
+
+            _vertices[i + 1] = new Vector3(currentInner.x, currentInner.y, 0);
             _colors[i + 1] = fillColor;
 
             if (enableStroke) {
-                Vector2 pPrev = currentPos[(i - 1 + res) % res];
-                Vector2 pNext = currentPos[(i + 1) % res];
+                // ✨ 核心修复：通过旋转角度（LerpAngle）而不是插值坐标，彻底解决变细问题
+                GetStrokeData(src, i, closedA, out Vector2 normA, out float miterA);
+                GetStrokeData(dst, idxB, closedB, out Vector2 normB, out float miterB);
 
-                int idxB = (i + activeOffset) % res;
-                if (idxB < 0) idxB += res;
-                int prevI = (i - 1 + res) % res;
-                int prevIdxB = (prevI + activeOffset) % res;
-                if (prevIdxB < 0) prevIdxB += res;
+                float angleA = Mathf.Atan2(normA.y, normA.x) * Mathf.Rad2Deg;
+                float angleB = Mathf.Atan2(normB.y, normB.x) * Mathf.Rad2Deg;
+                float currentAngle = Mathf.LerpAngle(angleA, angleB, t) * Mathf.Deg2Rad;
 
-                bool isBeforeGap = (!closedA && i == res - 1) || (!closedB && idxB == res - 1);
-                bool isAfterGap = (!closedA && prevI == res - 1) || (!closedB && prevIdxB == res - 1);
+                Vector2 currentNorm = new Vector2(Mathf.Cos(currentAngle), Mathf.Sin(currentAngle));
+                float currentMiter = Mathf.Lerp(miterA, miterB, t);
 
-                // ✨ 自动进行缺口处的法线平齐补偿
-                if (isBeforeGap && isAfterGap) {
-                    pNext = currentPos[i] + Vector2.right; pPrev = currentPos[i] - Vector2.right;
-                } else if (isBeforeGap) {
-                    pNext = currentPos[i] + (currentPos[i] - pPrev);
-                } else if (isAfterGap) {
-                    pPrev = currentPos[i] - (pNext - currentPos[i]);
-                }
+                Vector2 currentOuter = currentInner + currentNorm * (strokeWidth * currentMiter);
 
-                Vector2 dir = (pNext - pPrev).normalized;
-                if (dir == Vector2.zero) dir = Vector2.right;
-                Vector2 normal = new Vector2(dir.y, -dir.x);
-                Vector2 outerP = currentPos[i] + normal * strokeWidth;
-
-                _vertices[res + 1 + i] = new Vector3(currentPos[i].x, currentPos[i].y, 0);
+                _vertices[res + 1 + i] = new Vector3(currentInner.x, currentInner.y, 0);
                 _colors[res + 1 + i] = strokeColor;
-                _vertices[2 * res + 1 + i] = new Vector3(outerP.x, outerP.y, 0);
+                _vertices[2 * res + 1 + i] = new Vector3(currentOuter.x, currentOuter.y, 0);
                 _colors[2 * res + 1 + i] = strokeColor;
             }
         }
