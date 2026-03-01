@@ -40,6 +40,11 @@ public class VectorShapeCreator : MonoBehaviour {
     public int bakeResolution = 360;
 
     [Title("Visualization")]
+    public Color fillColor = Color.white;
+    public bool enableStroke = true;
+    public Color strokeColor = Color.black;
+    [Min(0)] public float strokeWidth = 0.1f;
+
     public bool showResolutionGizmos = true;
     [ShowIf(nameof(showResolutionGizmos))]
     public Color gizmoColor = Color.yellow;
@@ -65,7 +70,7 @@ public class VectorShapeCreator : MonoBehaviour {
     }
 
     // =========================================================
-    // ✨ 核心功能：Bake (保存到 Asset)
+    //  核心功能：Bake (保存到 Asset)
     // =========================================================
     [Button(ButtonSizes.Large, "Bake to Asset")]
     [GUIColor(0.2f, 0.8f, 0.2f)] // 绿色按钮
@@ -98,7 +103,7 @@ public class VectorShapeCreator : MonoBehaviour {
     }
 
     // =========================================================
-    // ✨ 核心功能：Load (从 Asset 读取)
+    //  核心功能：Load (从 Asset 读取)
     // =========================================================
     [Button(ButtonSizes.Medium, "Load from Asset")]
     [GUIColor(0.2f, 0.6f, 1.0f)] // 蓝色按钮
@@ -119,7 +124,7 @@ public class VectorShapeCreator : MonoBehaviour {
     }
 
     // =========================================================
-    // ✨ 预览与 Gizmos
+    //  预览与 Gizmos
     // =========================================================
     public void UpdatePreview() {
         if (_mesh == null) InitComponents();
@@ -147,7 +152,7 @@ public class VectorShapeCreator : MonoBehaviour {
     }
 
     // =========================================================
-    // 底层算法 (保持不变)
+    // 底层算法  
     // =========================================================
     Vector2[] GenerateKeyPoints() {
         List<Vector2> points = new List<Vector2>();
@@ -203,14 +208,56 @@ public class VectorShapeCreator : MonoBehaviour {
 
     void RenderMesh(Vector2[] polyVerts) {
         int count = polyVerts.Length;
-        Vector3[] v = new Vector3[count + 1];
-        int[] t = new int[count * 3];
-        Color[] c = new Color[count + 1];
-        v[0] = Vector3.zero; c[0] = Color.white;
+        int totalVerts = enableStroke ? (3 * count + 1) : (count + 1);
+        int totalTris = enableStroke ? (count * 9) : (count * 3);
+
+        Vector3[] v = new Vector3[totalVerts];
+        int[] t = new int[totalTris];
+        Color[] c = new Color[totalVerts];
+
+        v[0] = Vector3.zero; c[0] = fillColor;
+
         for (int i = 0; i < count; i++) {
-            v[i + 1] = polyVerts[i]; c[i + 1] = Color.white;
-            t[i * 3] = 0; t[i * 3 + 1] = i + 1; t[i * 3 + 2] = (i + 1) >= count ? 1 : i + 2;
+            v[i + 1] = polyVerts[i];
+            c[i + 1] = fillColor;
+
+            int next = (i + 1) % count;
+            t[i * 3] = 0;
+            t[i * 3 + 1] = i + 1;
+            t[i * 3 + 2] = next + 1;
+
+            if (enableStroke) {
+                Vector2 pPrev = polyVerts[(i - 1 + count) % count];
+                Vector2 pNext = polyVerts[(i + 1) % count];
+                Vector2 dir = (pNext - pPrev).normalized;
+                if (dir == Vector2.zero) dir = Vector2.right;
+                Vector2 normal = new Vector2(dir.y, -dir.x);
+
+                Vector2 outerP = polyVerts[i] + normal * strokeWidth;
+
+                v[count + 1 + i] = polyVerts[i];
+                c[count + 1 + i] = strokeColor;
+                v[2 * count + 1 + i] = outerP;
+                c[2 * count + 1 + i] = strokeColor;
+
+                int inner1 = count + 1 + i;
+                int inner2 = count + 1 + next;
+                int outer1 = 2 * count + 1 + i;
+                int outer2 = 2 * count + 1 + next;
+                int tIdx = count * 3 + i * 6;
+
+                t[tIdx] = inner1;
+                t[tIdx + 1] = outer1;
+                t[tIdx + 2] = outer2;
+                t[tIdx + 3] = inner1;
+                t[tIdx + 4] = outer2;
+                t[tIdx + 5] = inner2;
+            }
         }
-        _mesh.Clear(); _mesh.vertices = v; _mesh.triangles = t; _mesh.colors = c;
+
+        _mesh.Clear();
+        _mesh.vertices = v;
+        _mesh.triangles = t;
+        _mesh.colors = c;
     }
 }

@@ -3,8 +3,7 @@ using UnityEditor;
 using System.Collections.Generic;
 using System.Linq;
 
-public class VectorTimelineEditorWindow : EditorWindow
-{
+public class VectorTimelineEditorWindow : EditorWindow {
     // --- 数据引用 ---
     private VectorTimelineAsset currentAsset;
     private VectorTimelinePlayer previewPlayer;
@@ -34,13 +33,11 @@ public class VectorTimelineEditorWindow : EditorWindow
     private Texture2D whiteTexture;
 
     [MenuItem("Window/Vector Morph/Timeline Editor")]
-    public static void ShowWindow()
-    {
+    public static void ShowWindow() {
         GetWindow<VectorTimelineEditorWindow>("Vector Timeline");
     }
 
-    private void OnEnable()
-    {
+    private void OnEnable() {
         if (previewPlayer == null)
             previewPlayer = FindFirstObjectByType<VectorTimelinePlayer>();
 
@@ -51,23 +48,19 @@ public class VectorTimelineEditorWindow : EditorWindow
         whiteTexture.Apply();
     }
 
-    private void OnDisable()
-    {
+    private void OnDisable() {
         EditorApplication.update -= OnEditorUpdate;
         if (whiteTexture != null) DestroyImmediate(whiteTexture);
     }
 
-    private void OnEditorUpdate()
-    {
+    private void OnEditorUpdate() {
         // -----------------------------------------------------------------
         // 场景 A: 运行时 (Runtime) -> 观察者模式
         // -----------------------------------------------------------------
-        if (Application.isPlaying)
-        {
+        if (Application.isPlaying) {
             if (previewPlayer == null) previewPlayer = FindFirstObjectByType<VectorTimelinePlayer>();
 
-            if (previewPlayer != null && currentAsset != null)
-            {
+            if (previewPlayer != null && currentAsset != null) {
                 // 确保数据引用
                 if (previewPlayer.timelineData != currentAsset)
                     previewPlayer.timelineData = currentAsset;
@@ -77,10 +70,8 @@ public class VectorTimelineEditorWindow : EditorWindow
                 float dur = currentAsset.GetDuration();
 
                 // 映射红线位置
-                if (dur > 0.0001f)
-                {
-                    switch (currentAsset.loopMode)
-                    {
+                if (dur > 0.0001f) {
+                    switch (currentAsset.loopMode) {
                         case VectorLoopMode.Once:
                             currentTime = Mathf.Clamp(rawTime, 0, dur);
                             break;
@@ -91,9 +82,7 @@ public class VectorTimelineEditorWindow : EditorWindow
                             currentTime = Mathf.PingPong(rawTime, dur);
                             break;
                     }
-                }
-                else
-                {
+                } else {
                     currentTime = rawTime;
                 }
 
@@ -107,15 +96,13 @@ public class VectorTimelineEditorWindow : EditorWindow
         // 场景 B: 编辑器预览 (Editor) -> 控制者模式
         // -----------------------------------------------------------------
 
-        if (isScrubbing || isDraggingKey || isDraggingDuration)
-        {
+        if (isScrubbing || isDraggingKey || isDraggingDuration) {
             UpdateScenePreview();
             // 如果用户手动拖拽，重置反向状态，下次播放从正向开始
             isReversing = false;
         }
 
-        if (isPlaying && currentAsset != null)
-        {
+        if (isPlaying && currentAsset != null) {
             double timeNow = EditorApplication.timeSinceStartup;
             double delta = timeNow - lastEditorTime;
             lastEditorTime = timeNow;
@@ -123,47 +110,37 @@ public class VectorTimelineEditorWindow : EditorWindow
             float duration = currentAsset.GetDuration();
 
             // ✨✨ 核心修复：编辑器预览的 PingPong 逻辑 ✨✨
-            if (duration > 0)
-            {
-                if (currentAsset.loopMode == VectorLoopMode.PingPong)
-                {
+            if (duration > 0) {
+                if (currentAsset.loopMode == VectorLoopMode.PingPong) {
                     // 1. 根据方向增减时间
                     if (isReversing) currentTime -= (float)delta;
                     else currentTime += (float)delta;
 
                     // 2. 触顶反弹
-                    if (currentTime >= duration)
-                    {
+                    if (currentTime >= duration) {
                         currentTime = duration; // 修正超出的部分
                         isReversing = true;     // 切换为倒放
                     }
                     // 3. 触底反弹
-                    else if (currentTime <= 0)
-                    {
+                    else if (currentTime <= 0) {
                         currentTime = 0;
                         isReversing = false;    // 切换为正放
                     }
-                }
-                else
-                {
+                } else {
                     // 普通 Loop / Once 逻辑
                     isReversing = false; // 确保切模式后不倒放
                     currentTime += (float)delta;
 
-                    if (currentTime > duration)
-                    {
+                    if (currentTime > duration) {
                         if (currentAsset.loopMode == VectorLoopMode.Loop)
                             currentTime %= duration;
-                        else if (currentAsset.loopMode == VectorLoopMode.Once)
-                        {
+                        else if (currentAsset.loopMode == VectorLoopMode.Once) {
                             currentTime = duration;
                             isPlaying = false;
                         }
                     }
                 }
-            }
-            else
-            {
+            } else {
                 // 没有 Duration 时，只能无限增加
                 currentTime += (float)delta;
             }
@@ -173,13 +150,11 @@ public class VectorTimelineEditorWindow : EditorWindow
         }
     }
 
-    private void OnGUI()
-    {
+    private void OnGUI() {
         InitStyles();
         DrawToolbar();
 
-        if (currentAsset == null)
-        {
+        if (currentAsset == null) {
             GUILayout.FlexibleSpace();
             GUILayout.Label("请选择一个 VectorTimelineAsset", EditorStyles.centeredGreyMiniLabel);
             GUILayout.FlexibleSpace();
@@ -205,8 +180,7 @@ public class VectorTimelineEditorWindow : EditorWindow
     // 绘图逻辑
     // =========================================================
 
-    void DrawTimelineContent(Rect rect, float maxTime)
-    {
+    void DrawTimelineContent(Rect rect, float maxTime) {
         EditorGUI.DrawRect(rect, new Color(0.18f, 0.18f, 0.18f));
 
         Rect rulerRect = new Rect(rect.x, rect.y, rect.width, headerHeight);
@@ -215,8 +189,7 @@ public class VectorTimelineEditorWindow : EditorWindow
         Handles.color = new Color(1, 1, 1, 0.2f);
         float timeStep = GetTimeStep();
 
-        for (float t = 0; t <= maxTime; t += timeStep)
-        {
+        for (float t = 0; t <= maxTime; t += timeStep) {
             float x = rect.x + TimeToPixel(t);
             bool isMain = Mathf.Abs(t % 1.0f) < 0.001f;
             float h = isMain ? headerHeight : headerHeight * 0.5f;
@@ -224,16 +197,14 @@ public class VectorTimelineEditorWindow : EditorWindow
             Handles.color = isMain ? Color.gray : new Color(0.4f, 0.4f, 0.4f);
             Handles.DrawLine(new Vector3(x, rect.y + headerHeight - h), new Vector3(x, rect.y + headerHeight));
 
-            if (isMain)
-            {
+            if (isMain) {
                 Handles.color = new Color(1, 1, 1, 0.05f);
                 Handles.DrawLine(new Vector3(x, rect.y + headerHeight), new Vector3(x, rect.y + rect.height));
                 GUI.Label(new Rect(x + 2, rect.y, 40, 20), t.ToString("0"), EditorStyles.miniLabel);
             }
         }
 
-        if (currentAsset.duration > 0)
-        {
+        if (currentAsset.duration > 0) {
             float durX = rect.x + TimeToPixel(currentAsset.duration);
             Handles.color = new Color(0.2f, 0.6f, 1f, 0.8f);
             Handles.DrawLine(new Vector3(durX, rect.y), new Vector3(durX, rect.y + rect.height));
@@ -246,8 +217,7 @@ public class VectorTimelineEditorWindow : EditorWindow
             Handles.DrawAAConvexPolygon(handle);
             GUI.Label(new Rect(durX + 5, rect.y + 2, 50, 20), "End", EditorStyles.miniBoldLabel);
 
-            if (rect.width + rect.x > durX)
-            {
+            if (rect.width + rect.x > durX) {
                 Rect maskRect = new Rect(durX, rect.y + headerHeight, (rect.width + rect.x) - durX, rect.height - headerHeight);
                 EditorGUI.DrawRect(maskRect, new Color(0, 0, 0, 0.5f));
             }
@@ -255,15 +225,13 @@ public class VectorTimelineEditorWindow : EditorWindow
 
         float keyY = rect.y + headerHeight + (trackHeight / 2) - 8;
         Handles.color = Color.white;
-        for (int i = 0; i < currentAsset.keyframes.Count - 1; i++)
-        {
+        for (int i = 0; i < currentAsset.keyframes.Count - 1; i++) {
             float x1 = rect.x + TimeToPixel(currentAsset.keyframes[i].time);
             float x2 = rect.x + TimeToPixel(currentAsset.keyframes[i + 1].time);
             Handles.DrawDottedLine(new Vector3(x1, keyY + 8), new Vector3(x2, keyY + 8), 2f);
         }
 
-        for (int i = 0; i < currentAsset.keyframes.Count; i++)
-        {
+        for (int i = 0; i < currentAsset.keyframes.Count; i++) {
             var key = currentAsset.keyframes[i];
             float x = rect.x + TimeToPixel(key.time);
             Rect keyRect = new Rect(x - 8, keyY, 16, 16);
@@ -286,14 +254,12 @@ public class VectorTimelineEditorWindow : EditorWindow
         };
         Handles.DrawAAConvexPolygon(headHandle);
 
-        if (Application.isPlaying)
-        {
+        if (Application.isPlaying) {
             GUI.Label(new Rect(rect.x + 10, rect.y + headerHeight + 5, 200, 20), "▶ RUNTIME MODE (READ ONLY)", EditorStyles.boldLabel);
         }
     }
 
-    void DrawDiamond(Rect rect, Color color)
-    {
+    void DrawDiamond(Rect rect, Color color) {
         Color old = GUI.color;
         GUI.color = color;
         GUI.Box(rect, GUIContent.none, GUI.skin.button);
@@ -304,19 +270,16 @@ public class VectorTimelineEditorWindow : EditorWindow
     // 交互逻辑
     // =========================================================
 
-    void HandleInput(Rect rect)
-    {
+    void HandleInput(Rect rect) {
         if (Application.isPlaying) return;
 
         Event e = Event.current;
 
-        if (rect.Contains(e.mousePosition) || isDraggingKey || isScrubbing || isDraggingDuration)
-        {
+        if (rect.Contains(e.mousePosition) || isDraggingKey || isScrubbing || isDraggingDuration) {
             float localX = e.mousePosition.x - rect.x;
             float mouseTime = Mathf.Max(0, PixelToTime(localX));
 
-            if (e.type == EventType.MouseDown && e.button == 0)
-            {
+            if (e.type == EventType.MouseDown && e.button == 0) {
                 float pixelMouse = e.mousePosition.x;
                 float pixelPlayhead = rect.x + TimeToPixel(currentTime);
                 float pixelDuration = rect.x + TimeToPixel(currentAsset.duration);
@@ -328,15 +291,12 @@ public class VectorTimelineEditorWindow : EditorWindow
                 if (hitPlayhead && hitDuration) hitDuration = false;
 
                 bool hitKey = false;
-                if (!hitPlayhead && !hitDuration)
-                {
+                if (!hitPlayhead && !hitDuration) {
                     float keyY = rect.y + headerHeight + (trackHeight / 2) - 8;
-                    for (int i = 0; i < currentAsset.keyframes.Count; i++)
-                    {
+                    for (int i = 0; i < currentAsset.keyframes.Count; i++) {
                         float kx = rect.x + TimeToPixel(currentAsset.keyframes[i].time);
                         Rect keyRect = new Rect(kx - 8, keyY, 16, 16);
-                        if (keyRect.Contains(e.mousePosition))
-                        {
+                        if (keyRect.Contains(e.mousePosition)) {
                             selectedKeyIndex = i;
                             isDraggingKey = true;
                             hitKey = true;
@@ -347,17 +307,11 @@ public class VectorTimelineEditorWindow : EditorWindow
                     }
                 }
 
-                if (!hitKey)
-                {
-                    if (hitPlayhead) { isScrubbing = true; selectedKeyIndex = -1; e.Use(); }
-                    else if (hitDuration) { isDraggingDuration = true; Undo.RecordObject(currentAsset, "Modify Duration"); e.Use(); }
-                    else { isScrubbing = true; selectedKeyIndex = -1; currentTime = mouseTime; Repaint(); UpdateScenePreview(); e.Use(); }
+                if (!hitKey) {
+                    if (hitPlayhead) { isScrubbing = true; selectedKeyIndex = -1; e.Use(); } else if (hitDuration) { isDraggingDuration = true; Undo.RecordObject(currentAsset, "Modify Duration"); e.Use(); } else { isScrubbing = true; selectedKeyIndex = -1; currentTime = mouseTime; Repaint(); UpdateScenePreview(); e.Use(); }
                 }
-            }
-            else if (e.type == EventType.MouseDrag && e.button == 0)
-            {
-                if (isDraggingKey && selectedKeyIndex != -1)
-                {
+            } else if (e.type == EventType.MouseDrag && e.button == 0) {
+                if (isDraggingKey && selectedKeyIndex != -1) {
                     if (!e.shift) mouseTime = Mathf.Round(mouseTime * 10) / 10f;
                     Undo.RecordObject(currentAsset, "Move Keyframe");
                     var key = currentAsset.keyframes[selectedKeyIndex];
@@ -365,18 +319,13 @@ public class VectorTimelineEditorWindow : EditorWindow
                     currentAsset.keyframes[selectedKeyIndex] = key;
                     EditorUtility.SetDirty(currentAsset);
                     currentTime = mouseTime; UpdateScenePreview(); e.Use();
-                }
-                else if (isScrubbing) { currentTime = mouseTime; UpdateScenePreview(); Repaint(); e.Use(); }
-                else if (isDraggingDuration)
-                {
+                } else if (isScrubbing) { currentTime = mouseTime; UpdateScenePreview(); Repaint(); e.Use(); } else if (isDraggingDuration) {
                     if (!e.shift) mouseTime = Mathf.Round(mouseTime * 10) / 10f;
                     currentAsset.duration = Mathf.Max(0.1f, mouseTime);
                     EditorUtility.SetDirty(currentAsset);
                     Repaint(); UpdateScenePreview(); e.Use();
                 }
-            }
-            else if (e.type == EventType.MouseUp)
-            {
+            } else if (e.type == EventType.MouseUp) {
                 if (isDraggingKey) SortKeyframes();
                 isDraggingKey = false; isScrubbing = false; isDraggingDuration = false; e.Use();
             }
@@ -387,16 +336,14 @@ public class VectorTimelineEditorWindow : EditorWindow
     // 属性面板
     // =========================================================
 
-    void DrawInspectorArea()
-    {
+    void DrawInspectorArea() {
         GUILayout.Space(10);
         GUILayout.Label("Inspector", EditorStyles.boldLabel);
         GUI.enabled = !Application.isPlaying;
 
         GUILayout.BeginVertical(EditorStyles.helpBox);
 
-        if (selectedKeyIndex != -1 && selectedKeyIndex < currentAsset.keyframes.Count)
-        {
+        if (selectedKeyIndex != -1 && selectedKeyIndex < currentAsset.keyframes.Count) {
             var key = currentAsset.keyframes[selectedKeyIndex];
             EditorGUI.BeginChangeCheck();
             EditorGUILayout.LabelField($"Selected Keyframe ({key.time:F2}s)", EditorStyles.boldLabel);
@@ -407,8 +354,7 @@ public class VectorTimelineEditorWindow : EditorWindow
             int newOffset = EditorGUILayout.IntSlider("Align Offset", key.alignOffset, 0, 360);
             AnimationCurve newCurve = EditorGUILayout.CurveField("Transition Curve", key.curve);
 
-            if (EditorGUI.EndChangeCheck())
-            {
+            if (EditorGUI.EndChangeCheck()) {
                 Undo.RecordObject(currentAsset, "Modify Keyframe");
                 key.time = Mathf.Max(0, newTime);
                 key.shapeAsset = newShape;
@@ -422,16 +368,13 @@ public class VectorTimelineEditorWindow : EditorWindow
                 UpdateScenePreview();
                 Repaint();
             }
-        }
-        else
-        {
+        } else {
             EditorGUILayout.LabelField("Global Settings", EditorStyles.boldLabel);
             EditorGUI.BeginChangeCheck();
             var loopMode = (VectorLoopMode)EditorGUILayout.EnumPopup("Loop Mode", currentAsset.loopMode);
             float dur = EditorGUILayout.FloatField("Total Duration", currentAsset.duration);
 
-            if (EditorGUI.EndChangeCheck())
-            {
+            if (EditorGUI.EndChangeCheck()) {
                 Undo.RecordObject(currentAsset, "Global Settings");
                 currentAsset.loopMode = loopMode;
                 currentAsset.duration = Mathf.Max(0, dur);
@@ -457,8 +400,7 @@ public class VectorTimelineEditorWindow : EditorWindow
     // 辅助 & 工具
     // =========================================================
 
-    void DrawToolbar()
-    {
+    void DrawToolbar() {
         GUILayout.BeginHorizontal(EditorStyles.toolbar);
         GUI.enabled = !Application.isPlaying;
         GUILayout.Label("Asset:", GUILayout.Width(40));
@@ -475,8 +417,7 @@ public class VectorTimelineEditorWindow : EditorWindow
         if (GUILayout.Button("⏮", EditorStyles.toolbarButton, GUILayout.Width(25))) { currentTime = 0; UpdateScenePreview(); }
 
         bool newPlaying = GUILayout.Toggle(isPlaying, isPlaying ? "⏸" : "▶", EditorStyles.toolbarButton, GUILayout.Width(35));
-        if (newPlaying != isPlaying)
-        {
+        if (newPlaying != isPlaying) {
             isPlaying = newPlaying;
             lastEditorTime = EditorApplication.timeSinceStartup;
             isReversing = false; // ✨ 切换播放时重置方向
@@ -495,8 +436,7 @@ public class VectorTimelineEditorWindow : EditorWindow
     float TimeToPixel(float time) => time * zoom;
     float PixelToTime(float pixel) => pixel / zoom;
     void InitStyles() { if (keyframeStyle == null) keyframeStyle = new GUIStyle(GUI.skin.button); }
-    void AddKeyframe()
-    {
+    void AddKeyframe() {
         Undo.RecordObject(currentAsset, "Add Keyframe");
         var newKey = new TimelineKeyframe { time = currentTime, scale = 1.0f, curve = AnimationCurve.Linear(0, 0, 1, 1), alignOffset = 0, isInstant = false };
         if (currentAsset.keyframes.Count > 0) newKey.shapeAsset = currentAsset.keyframes.Last().shapeAsset;
@@ -504,27 +444,22 @@ public class VectorTimelineEditorWindow : EditorWindow
         SortKeyframes(); selectedKeyIndex = currentAsset.keyframes.IndexOf(newKey);
         EditorUtility.SetDirty(currentAsset); Repaint();
     }
-    void RemoveKeyframe()
-    {
-        if (selectedKeyIndex != -1)
-        {
+    void RemoveKeyframe() {
+        if (selectedKeyIndex != -1) {
             Undo.RecordObject(currentAsset, "Remove Keyframe");
             currentAsset.keyframes.RemoveAt(selectedKeyIndex);
             selectedKeyIndex = -1;
             EditorUtility.SetDirty(currentAsset); Repaint();
         }
     }
-    void SortKeyframes()
-    {
+    void SortKeyframes() {
         var selectedKey = (selectedKeyIndex != -1) ? currentAsset.keyframes[selectedKeyIndex] : default;
         currentAsset.keyframes = currentAsset.keyframes.OrderBy(k => k.time).ToList();
         if (selectedKeyIndex != -1) selectedKeyIndex = currentAsset.keyframes.IndexOf(selectedKey);
     }
-    void UpdateScenePreview()
-    {
+    void UpdateScenePreview() {
         if (previewPlayer == null) previewPlayer = FindFirstObjectByType<VectorTimelinePlayer>();
-        if (previewPlayer != null && currentAsset != null)
-        {
+        if (previewPlayer != null && currentAsset != null) {
             if (previewPlayer.timelineData != currentAsset) previewPlayer.timelineData = currentAsset;
             previewPlayer.debugTime = currentTime;
             previewPlayer.Evaluate(currentTime);
